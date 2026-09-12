@@ -40,3 +40,23 @@ is tracked separately).
 
 **Result.** Same `clientId` twice over HTTP → same message id both times, one row in MySQL, one
 body in Mongo; distinct/null `clientId`s unaffected.
+
+## 3. N+1 queries on the inbox + no index on messages
+
+**What was wrong.** `GET /api/conversations` ran 1 query for the list plus 2 queries *per
+conversation* (last message, count) — 1+2N round trips (RED test measured 7 queries for 3
+conversations; 50 conversations would be 101). On top of that, `messages` had no index on
+`conversation_id`, so every one of those lookups — and every history read — was a full table scan
+over *all* messages in the system.
+
+**Fix.** Test-first (`tests/conversations.test.ts`): correctness tests pin the response shape
+(last message, counts, empty conversations), and a query-count guard asserts a listing takes ≤ 2
+queries regardless of conversation count. The listing was extracted to
+`src/services/conversations.ts` and rewritten as a single query — `LEFT JOIN LATERAL` computes
+`COUNT(*)` + `MAX(id)` per conversation, then one join picks up the last message row. Added
+`KEY idx_messages_conversation (conversation_id)` (InnoDB appends the PK, so it acts as
+`(conversation_id, id)`, id-ordered per conversation).
+
+**Result.** 1+2N queries → 1 query; `EXPLAIN FORMAT=TREE` shows the aggregate as a *covering index
+lookup* on `idx_messages_conversation` — cost now tracks the user's conversation count, not total
+messages in the table. The same index also serves `GET /api/messages` history reads.

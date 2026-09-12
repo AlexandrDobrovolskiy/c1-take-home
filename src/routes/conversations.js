@@ -1,5 +1,6 @@
 import express from 'express';
 import { pool } from '../db/mysql.ts';
+import { listConversations } from '../services/conversations.ts';
 import { wrap } from '../lib/wrap.ts';
 
 const MAX_TITLE_LENGTH = 200;
@@ -9,32 +10,7 @@ export const conversationsRouter = express.Router();
 conversationsRouter.get(
   '/',
   wrap(async (req, res) => {
-    const userId = req.user.uid;
-
-    const [conversations] = await pool.query(
-      `SELECT c.id, c.title
-       FROM conversations c
-       JOIN conversation_participants p ON p.conversation_id = c.id
-       WHERE p.user_id = ?
-       ORDER BY c.id ASC`,
-      [userId],
-    );
-
-    const result = [];
-    for (const c of conversations) {
-      const [[last]] = await pool.query(
-        `SELECT id, sender_id AS senderId, created_at AS createdAt
-         FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1`,
-        [c.id],
-      );
-      const [[counted]] = await pool.query(
-        'SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?',
-        [c.id],
-      );
-      result.push({ ...c, lastMessage: last || null, messageCount: counted.count });
-    }
-
-    res.json(result);
+    res.json(await listConversations(req.user.uid));
   }),
 );
 

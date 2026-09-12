@@ -28,7 +28,10 @@ CREATE TABLE messages (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   -- idempotency: a client retry with the same clientId must not create a second message
   -- (NULL client_id rows are exempt — MySQL allows repeated NULLs in a unique index)
-  UNIQUE KEY uq_messages_conversation_client (conversation_id, client_id)
+  UNIQUE KEY uq_messages_conversation_client (conversation_id, client_id),
+  -- per-conversation access path: history reads, last-message and count lookups.
+  -- InnoDB appends the PK, so this behaves as (conversation_id, id) — id-ordered per conversation.
+  KEY idx_messages_conversation (conversation_id)
 );
 
 -- demo password for all three users: "demo" (scrypt, salt:hash)
