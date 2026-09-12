@@ -21,3 +21,7 @@ export function mongo(): Db {
   if (!db) throw new Error('mongo not connected');
   return db;
 }
+
+export async function closeMongo(): Promise<void> {
+  await client.close();
+}

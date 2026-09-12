@@ -25,7 +25,10 @@ CREATE TABLE messages (
   conversation_id INT NOT NULL,
   sender_id INT NOT NULL,
   client_id VARCHAR(64) NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- idempotency: a client retry with the same clientId must not create a second message
+  -- (NULL client_id rows are exempt — MySQL allows repeated NULLs in a unique index)
+  UNIQUE KEY uq_messages_conversation_client (conversation_id, client_id)
 );
 
 -- demo password for all three users: "demo" (scrypt, salt:hash)
