@@ -1,16 +1,25 @@
 import http from 'node:http';
+import os from 'node:os';
 import express from 'express';
 import { config } from './config.ts';
 import { waitForMysql } from './db/mysql.ts';
 import { connectMongo } from './db/mongo.ts';
+import { connectRedis } from './db/redis.ts';
 import { requireAuth } from './auth/middleware.ts';
 import { authRouter } from './routes/auth.ts';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
-import { attachWs } from './ws/hub.ts';
+import { attachWs, startFanout } from './ws/hub.ts';
+
+// Which replica served a request — useful when running multiple instances.
+const INSTANCE = os.hostname();
 
 const app = express();
+app.use((_req, res, next) => {
+  res.set('X-Instance', INSTANCE);
+  next();
+});
 app.use(express.json());
 app.use(express.static('web'));
 
@@ -32,7 +41,9 @@ attachWs(server);
 
 await waitForMysql();
 await connectMongo();
+await connectRedis();
+await startFanout();
 
 server.listen(config.port, () => {
-  console.log(`relay listening on :${config.port}`);
+  console.log(`relay listening on :${config.port} (instance ${INSTANCE})`);
 });

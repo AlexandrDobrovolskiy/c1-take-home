@@ -33,7 +33,7 @@ messagesRouter.post(
 
     // Sender username comes straight from the token — no extra lookup.
     const out = { ...msg, senderUsername: req.user.username };
-    broadcast(out.conversationId, { type: 'message', ...out });
+    await broadcast(out.conversationId, { type: 'message', ...out });
     res.status(201).json(out);
   }),
 );

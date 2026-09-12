@@ -14,6 +14,8 @@ services:
     restart: on-failure
     env_file: .env
     expose: ["3000"]
+    deploy:
+      replicas: 3
     depends_on:
       seed:
         condition: service_completed_successfully
