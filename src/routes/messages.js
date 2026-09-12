@@ -1,15 +1,25 @@
 import express from 'express';
+import { config } from '../config.ts';
 import { createMessage, listMessages } from '../services/messages.ts';
 import { isParticipant } from '../services/participants.ts';
 import { broadcast } from '../ws/hub.ts';
+import { rateLimit } from '../lib/rateLimit.ts';
 import { wrap } from '../lib/wrap.ts';
 
 const MAX_BODY_LENGTH = 4000;
 
 export const messagesRouter = express.Router();
 
+// Per user per conversation, so one noisy sender can't throttle anyone else
+// (and can still talk in their other conversations).
+const sendLimiter = rateLimit({
+  ...config.sendRate,
+  key: (req) => `send:${req.user.uid}:${Number(req.body?.conversationId)}`,
+});
+
 messagesRouter.post(
   '/',
+  sendLimiter,
   wrap(async (req, res) => {
     const { conversationId, body, clientId } = req.body || {};
     const convId = Number(conversationId);

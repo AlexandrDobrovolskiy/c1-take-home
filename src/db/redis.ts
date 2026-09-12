@@ -13,3 +13,7 @@ export async function connectRedis(): Promise<void> {
   redisSub.on('error', (err) => console.error('redis sub:', err.message));
   await Promise.all([redisPub.connect(), redisSub.connect()]);
 }
+
+export async function closeRedis(): Promise<void> {
+  await Promise.all([redisPub.close(), redisSub.close()]);
+}

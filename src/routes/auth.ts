@@ -1,8 +1,10 @@
 import express from 'express';
+import { config } from '../config.ts';
 import { pool } from '../db/mysql.ts';
 import { verifyPassword } from '../auth/passwords.ts';
 import { signToken } from '../auth/tokens.ts';
 import { COOKIE_NAME, requireAuth } from '../auth/middleware.ts';
+import { rateLimit } from '../lib/rateLimit.ts';
 import { wrap } from '../lib/wrap.ts';
 
 const TOKEN_TTL_S = 7 * 24 * 3600;
@@ -14,8 +16,13 @@ const DUMMY_HASH =
 
 export const authRouter = express.Router();
 
+// Brute-force deterrence, keyed by client IP (Envoy sets X-Forwarded-For;
+// `trust proxy` makes req.ip honor it).
+const loginLimiter = rateLimit({ ...config.loginRate, key: (req) => `login:${req.ip}` });
+
 authRouter.post(
   '/login',
+  loginLimiter,
   wrap(async (req, res) => {
     const { username, password } = req.body || {};
     if (typeof username !== 'string' || typeof password !== 'string') {

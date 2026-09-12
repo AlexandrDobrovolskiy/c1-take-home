@@ -16,6 +16,7 @@ import { attachWs, startFanout } from './ws/hub.ts';
 const INSTANCE = os.hostname();
 
 const app = express();
+app.set('trust proxy', true); // behind Envoy — req.ip comes from X-Forwarded-For
 app.use((_req, res, next) => {
   res.set('X-Instance', INSTANCE);
   next();

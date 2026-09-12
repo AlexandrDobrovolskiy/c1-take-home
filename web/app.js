@@ -158,7 +158,7 @@ document.getElementById('composer').onsubmit = async (e) => {
   const body = input.value.trim();
   if (!body || !activeConversation) return;
   input.value = '';
-  await fetch('/api/messages', {
+  const res = await fetch('/api/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -167,7 +167,25 @@ document.getElementById('composer').onsubmit = async (e) => {
       clientId: crypto.randomUUID(),
     }),
   });
+  if (!res.ok) {
+    input.value = body; // don't lose what they typed
+    if (res.status === 429) {
+      const wait = res.headers.get('Retry-After') || 'a few';
+      flashComposer(`Sending too fast — retry in ${wait}s`);
+    }
+  }
 };
+
+function flashComposer(text) {
+  const input = document.getElementById('text');
+  input.classList.add('throttled');
+  const prev = input.placeholder;
+  input.placeholder = text;
+  setTimeout(() => {
+    input.classList.remove('throttled');
+    input.placeholder = prev;
+  }, 2500);
+}
 
 document.getElementById('newConv').onclick = async () => {
   const title = prompt('Conversation title?');
