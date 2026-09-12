@@ -1,10 +1,26 @@
-const userId = 1;
+let me = null;
 let ws;
 let activeConversation;
 let conversations = [];
 
+async function init() {
+  const res = await fetch('/api/auth/me');
+  if (res.ok) {
+    me = await res.json();
+    showApp();
+  } else {
+    document.getElementById('login').hidden = false;
+  }
+}
+
+function showApp() {
+  document.getElementById('login').hidden = true;
+  document.getElementById('userName').textContent = me.username;
+  loadConversations();
+}
+
 async function loadConversations() {
-  const res = await fetch(`/api/conversations?userId=${userId}`);
+  const res = await fetch('/api/conversations');
   conversations = await res.json();
   renderSidebar();
   connectWs();
@@ -16,8 +32,15 @@ function renderSidebar() {
   for (const c of conversations) {
     const li = document.createElement('li');
     if (c.id === activeConversation) li.className = 'active';
-    li.innerHTML =
-      `<span>${c.title} (${c.messageCount})</span>` + (c.unread ? '<span class="dot">●</span>' : '');
+    const label = document.createElement('span');
+    label.textContent = `${c.title} (${c.messageCount})`;
+    li.appendChild(label);
+    if (c.unread) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.textContent = '●';
+      li.appendChild(dot);
+    }
     li.onclick = () => openConversation(c.id, c.title);
     list.appendChild(li);
   }
@@ -60,7 +83,7 @@ function appendMessage(m) {
   const pane = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'msg';
-  div.textContent = `#${m.senderId}: ${m.body}`;
+  div.textContent = `${m.senderUsername ?? '#' + m.senderId}: ${m.body}`;
   pane.appendChild(div);
   pane.scrollTop = pane.scrollHeight;
 }
@@ -76,7 +99,6 @@ document.getElementById('composer').onsubmit = async (e) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       conversationId: activeConversation,
-      senderId: userId,
       body,
       clientId: crypto.randomUUID(),
     }),
@@ -86,11 +108,18 @@ document.getElementById('composer').onsubmit = async (e) => {
 document.getElementById('newConv').onclick = async () => {
   const title = prompt('Conversation title?');
   if (!title) return;
-  await fetch('/api/conversations', {
+  const invite = prompt('Invite usernames (comma-separated)?', '') || '';
+  const participantUsernames = invite.split(',').map((s) => s.trim()).filter(Boolean);
+  const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, participantIds: [userId, 2] }),
+    body: JSON.stringify({ title, participantUsernames }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    console.error('failed to create conversation:', err.error || res.status);
+    return;
+  }
   await loadConversations();
 };
 
@@ -127,4 +156,28 @@ function renderResults(q, results) {
   }
 }
 
-loadConversations();
+document.getElementById('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: document.getElementById('loginUser').value.trim(),
+      password: document.getElementById('loginPass').value,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    document.getElementById('loginError').textContent = err.error || 'login failed';
+    return;
+  }
+  me = await res.json();
+  showApp();
+};
+
+document.getElementById('logout').onclick = async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.reload();
+};
+
+init();
