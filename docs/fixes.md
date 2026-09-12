@@ -60,3 +60,39 @@ queries regardless of conversation count. The listing was extracted to
 **Result.** 1+2N queries → 1 query; `EXPLAIN FORMAT=TREE` shows the aggregate as a *covering index
 lookup* on `idx_messages_conversation` — cost now tracks the user's conversation count, not total
 messages in the table. The same index also serves `GET /api/messages` history reads.
+
+## 4. Unbounded history fetch → cursor pagination
+
+**What was wrong.** `GET /api/messages` returned the *entire* conversation history on every open —
+an unbounded MySQL read plus a Mongo `$in` over every message id. Memory and latency grew linearly
+with conversation size, on every single open.
+
+**Fix.** Test-first (`tests/pagination.test.ts`). Cursor pagination in `listMessages`:
+`GET /api/messages?conversationId=X[&limit=50][&before=<id>]` returns
+`{ messages (ascending), nextCursor }` — pass `nextCursor` as `before` for the next-older page.
+Message id is the cursor (monotonic per the PK, stable under concurrent writes — offset pagination
+would skip/duplicate rows as new messages land). The query is a newest-first index scan on
+`(conversation_id, id)` with `LIMIT n+1` to detect whether more history exists without a COUNT;
+the Mongo `$in` is now bounded by the page size (max 100). UI shows a "Load older messages" button
+that prepends a page while keeping the scroll position anchored.
+
+**Note.** This changed the endpoint's response shape from a bare array to an envelope — the UI is
+the only consumer, updated in the same commit.
+
+## 5. WebSocket resilience: server heartbeat + client auto-reconnect
+
+**What was wrong.** Two halves of the same problem. Server: dead peers (network drop, killed tab)
+never send a close frame, so their sockets stayed in the hub's `clients` set forever — a slow leak,
+and `broadcast` kept writing into the void. Client: any dropped connection silently ended live
+updates; worse, the UI relies on the WS echo to display your own sent messages, so sends appeared
+to vanish.
+
+**Fix.** Server: standard ping/pong heartbeat every 30s — sockets that miss a pong are terminated,
+which fires their `close` handler and drops them from the set. Client: `onclose` triggers
+exponential backoff (1s → 15s cap); each attempt re-fetches the conversation list and the open
+conversation (catching up on anything missed while offline), then reconnects and re-subscribes.
+A 4401 close (token expired/invalid) reloads to the login screen instead of retry-looping, and a
+401 from any refresh does the same.
+
+**Verified live:** browser tab open → `docker compose restart api` → client reconnected on backoff
+and a message posted by another user immediately appeared over the new socket.

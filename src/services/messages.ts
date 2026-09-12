@@ -16,6 +16,58 @@ export interface Message {
   createdAt: Date;
 }
 
+export interface MessagePage {
+  messages: (Message & { senderUsername: string })[];
+  nextCursor: number | null; // pass as `before` to fetch the next-older page
+}
+
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+
+export async function listMessages(
+  conversationId: number,
+  opts: { limit?: number; before?: number } = {},
+): Promise<MessagePage> {
+  const limit = Math.min(Math.max(opts.limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+
+  // Newest-first index scan on (conversation_id, id); limit+1 detects whether
+  // an older page exists without a separate COUNT.
+  const params: unknown[] = [conversationId];
+  let cursor = '';
+  if (opts.before) {
+    cursor = 'AND m.id < ?';
+    params.push(opts.before);
+  }
+  params.push(limit + 1);
+  const [rows] = (await pool.query(
+    `SELECT m.id, m.conversation_id AS conversationId, m.sender_id AS senderId,
+            m.created_at AS createdAt, u.username AS senderUsername
+     FROM messages m
+     JOIN users u ON u.id = m.sender_id
+     WHERE m.conversation_id = ? ${cursor}
+     ORDER BY m.id DESC
+     LIMIT ?`,
+    params,
+  )) as unknown as [(Message & { senderUsername: string })[]];
+
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit).reverse(); // ascending for display
+
+  const ids = page.map((m) => m.id);
+  const bodies = ids.length
+    ? await mongo()
+        .collection('message_bodies')
+        .find({ _id: { $in: ids as never[] } })
+        .toArray()
+    : [];
+  const bodyById = new Map(bodies.map((b) => [b._id as unknown as number, b.body as string]));
+
+  return {
+    messages: page.map((m) => ({ ...m, body: bodyById.get(m.id) ?? '' })),
+    nextCursor: hasMore && page.length ? page[0].id : null,
+  };
+}
+
 export async function createMessage(input: NewMessage): Promise<Message> {
   const { conversationId, senderId, body, clientId } = input;
 

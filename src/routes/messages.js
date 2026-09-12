@@ -1,8 +1,6 @@
 import express from 'express';
-import { createMessage } from '../services/messages.ts';
+import { createMessage, listMessages } from '../services/messages.ts';
 import { isParticipant } from '../services/participants.ts';
-import { pool } from '../db/mysql.ts';
-import { mongo } from '../db/mongo.ts';
 import { broadcast } from '../ws/hub.ts';
 import { wrap } from '../lib/wrap.ts';
 
@@ -40,6 +38,9 @@ messagesRouter.post(
   }),
 );
 
+// GET /api/messages?conversationId=X[&limit=50][&before=<id>]
+// Returns { messages: [...ascending...], nextCursor } — pass nextCursor as
+// `before` to page backward through history.
 messagesRouter.get(
   '/',
   wrap(async (req, res) => {
@@ -47,25 +48,16 @@ messagesRouter.get(
     if (!Number.isInteger(conversationId)) {
       return res.status(400).json({ error: 'conversationId is required' });
     }
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const before = req.query.before !== undefined ? Number(req.query.before) : undefined;
+    if ((limit !== undefined && !Number.isInteger(limit)) ||
+        (before !== undefined && !(Number.isInteger(before) && before > 0))) {
+      return res.status(400).json({ error: 'limit and before must be positive integers' });
+    }
     if (!(await isParticipant(conversationId, req.user.uid))) {
       return res.status(403).json({ error: 'not a participant of this conversation' });
     }
 
-    const [rows] = await pool.query(
-      `SELECT m.id, m.conversation_id AS conversationId, m.sender_id AS senderId,
-              m.created_at AS createdAt, u.username AS senderUsername
-       FROM messages m
-       JOIN users u ON u.id = m.sender_id
-       WHERE m.conversation_id = ? ORDER BY m.id ASC`,
-      [conversationId],
-    );
-
-    const ids = rows.map((r) => r.id);
-    const bodies = ids.length
-      ? await mongo().collection('message_bodies').find({ _id: { $in: ids } }).toArray()
-      : [];
-    const bodyById = new Map(bodies.map((b) => [b._id, b.body]));
-
-    res.json(rows.map((r) => ({ ...r, body: bodyById.get(r.id) ?? '' })));
+    res.json(await listMessages(conversationId, { limit, before }));
   }),
 );

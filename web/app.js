@@ -1,6 +1,8 @@
 let me = null;
 let ws;
+let wsRetry = 0;
 let activeConversation;
+let nextCursor = null;
 let conversations = [];
 
 async function init() {
@@ -21,6 +23,8 @@ function showApp() {
 
 async function loadConversations() {
   const res = await fetch('/api/conversations');
+  if (res.status === 401) return location.reload(); // session expired -> login screen
+  if (!res.ok) throw new Error(`failed to load conversations: ${res.status}`);
   conversations = await res.json();
   renderSidebar();
   connectWs();
@@ -47,10 +51,15 @@ function renderSidebar() {
 }
 
 function connectWs() {
-  if (ws) ws.close();
+  if (ws) {
+    ws.onclose = null; // deliberate replacement, not a drop — don't reconnect
+    ws.close();
+  }
   ws = new WebSocket(`ws://${location.host}/`);
-  ws.onopen = () =>
+  ws.onopen = () => {
+    wsRetry = 0;
     ws.send(JSON.stringify({ type: 'subscribe', conversationIds: conversations.map((c) => c.id) }));
+  };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type !== 'message') return;
@@ -63,6 +72,30 @@ function connectWs() {
     }
     renderSidebar();
   };
+  ws.onclose = (ev) => {
+    if (ev.code === 4401) return location.reload(); // auth rejected -> login screen
+    scheduleReconnect();
+  };
+}
+
+function scheduleReconnect() {
+  const delay = Math.min(15_000, 1000 * 2 ** wsRetry++);
+  setTimeout(async () => {
+    try {
+      await resync();
+    } catch {
+      scheduleReconnect(); // server still down — back off and retry
+    }
+  }, delay);
+}
+
+// After an outage: refresh sidebar counts, reconnect the socket, and re-fetch
+// the open conversation so messages missed while offline appear.
+async function resync() {
+  await loadConversations();
+  if (!activeConversation) return;
+  const c = conversations.find((x) => x.id === activeConversation);
+  if (c) await openConversation(c.id, c.title);
 }
 
 async function openConversation(id, title) {
@@ -73,18 +106,49 @@ async function openConversation(id, title) {
 
   document.getElementById('title').textContent = title;
   const res = await fetch(`/api/messages?conversationId=${id}`);
-  const messages = await res.json();
+  if (!res.ok) return;
+  const page = await res.json();
+  nextCursor = page.nextCursor;
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
-  for (const m of messages) appendMessage(m);
+  renderOlderButton(pane);
+  for (const m of page.messages) appendMessage(m);
+}
+
+function renderOlderButton(pane) {
+  document.getElementById('loadOlder')?.remove();
+  if (!nextCursor) return;
+  const btn = document.createElement('button');
+  btn.id = 'loadOlder';
+  btn.textContent = 'Load older messages';
+  btn.onclick = loadOlder;
+  pane.prepend(btn);
+}
+
+async function loadOlder() {
+  if (!nextCursor || !activeConversation) return;
+  const res = await fetch(`/api/messages?conversationId=${activeConversation}&before=${nextCursor}`);
+  if (!res.ok) return;
+  const page = await res.json();
+  nextCursor = page.nextCursor;
+  const pane = document.getElementById('messages');
+  const prevHeight = pane.scrollHeight;
+  const anchor = document.getElementById('loadOlder')?.nextSibling ?? pane.firstChild;
+  for (const m of page.messages) pane.insertBefore(messageDiv(m), anchor);
+  renderOlderButton(pane);
+  pane.scrollTop += pane.scrollHeight - prevHeight; // keep view anchored
+}
+
+function messageDiv(m) {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.textContent = `${m.senderUsername ?? '#' + m.senderId}: ${m.body}`;
+  return div;
 }
 
 function appendMessage(m) {
   const pane = document.getElementById('messages');
-  const div = document.createElement('div');
-  div.className = 'msg';
-  div.textContent = `${m.senderUsername ?? '#' + m.senderId}: ${m.body}`;
-  pane.appendChild(div);
+  pane.appendChild(messageDiv(m));
   pane.scrollTop = pane.scrollHeight;
 }
 
