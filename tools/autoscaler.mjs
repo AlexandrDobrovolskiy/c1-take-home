@@ -26,12 +26,17 @@ const COMPOSE = ['compose', '-p', PROJECT, ...FILES];
 
 const MIN = Number(process.env.MIN ?? 2);
 const MAX = Number(process.env.MAX ?? 6);
-const UP_CPU = Number(process.env.UP_CPU ?? 70); // % of one core, per replica avg
+// HPA-style: keep replicas around TARGET_CPU. Scale-up triggers above UP_CPU
+// and jumps straight to desired = ceil(n * cpu / TARGET_CPU) — under a sudden
+// 3x load that means 2 -> 4+ in one step instead of +1 per cooldown, which is
+// what shrinks the under-provisioned latency window.
+const TARGET_CPU = Number(process.env.TARGET_CPU ?? 55);
+const UP_CPU = Number(process.env.UP_CPU ?? 60); // % of one core, per replica avg
 const DOWN_CPU = Number(process.env.DOWN_CPU ?? 25);
-const TICK_MS = Number(process.env.TICK_MS ?? 10_000);
+const TICK_MS = Number(process.env.TICK_MS ?? 5_000);
 const UP_TICKS = 2;
-const DOWN_TICKS = 6;
-const COOLDOWN_MS = 30_000;
+const DOWN_TICKS = 12;
+const COOLDOWN_MS = 20_000;
 
 let hot = 0;
 let cold = 0;
@@ -69,8 +74,12 @@ for (;;) {
     if (!coolingDown) {
       hot = cpu > UP_CPU ? hot + 1 : 0;
       cold = cpu < DOWN_CPU ? cold + 1 : 0;
-      if (hot >= UP_TICKS && ids.length < MAX) await scaleTo(ids.length + 1, `cpu ${cpu.toFixed(0)}% > ${UP_CPU}%`);
-      else if (cold >= DOWN_TICKS && ids.length > MIN) await scaleTo(ids.length - 1, `cpu ${cpu.toFixed(0)}% < ${DOWN_CPU}%`);
+      if (hot >= UP_TICKS && ids.length < MAX) {
+        const desired = Math.min(MAX, Math.max(ids.length + 1, Math.ceil((ids.length * cpu) / TARGET_CPU)));
+        await scaleTo(desired, `cpu ${cpu.toFixed(0)}% > ${UP_CPU}%, targeting ${TARGET_CPU}%`);
+      } else if (cold >= DOWN_TICKS && ids.length > MIN) {
+        await scaleTo(ids.length - 1, `cpu ${cpu.toFixed(0)}% < ${DOWN_CPU}%`);
+      }
     }
   } catch (err) {
     log(`error: ${err.message}`);

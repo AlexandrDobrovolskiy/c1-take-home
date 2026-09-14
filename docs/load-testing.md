@@ -111,3 +111,36 @@ Mongo `message_bodies` delta (plus zero empty/missing bodies):
 
 Every message accepted with 201 landed in both stores under both loads — the dual-write with
 idempotent retry healing held up with no drift. No restarts or OOM kills in either run.
+
+## Round 2: max-scale run, spike tuning, and a config lesson
+
+Follow-up asks: heavier load (beyond 3 replicas), and shrinking the p99 spike that appears in the
+window between load arriving and new replicas taking traffic.
+
+**Tuning applied:**
+- Autoscaler became HPA-like: 5s ticks, trigger at 60%, and **proportional jumps**
+  (`desired = ceil(replicas × cpu / 55%)`) — under a steep ramp it goes 2→3→5→6 in ~60s instead of
+  +1 per cooldown. Scale-down stays slow (12 quiet ticks).
+- Envoy: `LEAST_REQUEST` balancing (stops blind round-robin into a saturated or cold replica),
+  `dns_refresh_rate: 2s` (new replicas take traffic sooner), and a conservative retry policy
+  (`connect-failure,refused-stream` only — never reached a handler, so safe for non-idempotent
+  routes) to absorb connection churn during scale events.
+
+**Spike result (identical 3,000/s runs):** server-side p99 spike 54ms → 44ms, failures during
+transitions 0.06%→0.26%→0.12% across runs (noise-level). Honest conclusion: reactive scaling always
+has a detection+boot window (~10-15s here); tuning shrinks the spike but only headroom (higher MIN)
+or predictive scaling eliminates it. The spike is confined to p99 — p95 stayed single-digit ms
+throughout.
+
+**Max-scale run (offered 6,000 sends/s, start at 2 replicas, MAX=6):** autoscaler stepped 2→3→5→6;
+**479,686 messages fully processed (99.87%)**, 0.12% failures, ~5/s dropped iterations at peak;
+send med 6.4ms / p95 21ms / p99 44ms — elevated but stable at double the previously verified
+comfortable rate, with zero 5xx. On 18 host cores shared with the DBs and the load generator
+itself, ~6,000 processed sends/s (≈19,000 WS deliveries/s) is the practical ceiling of this setup.
+
+**Config lesson (found via the dashboard):** the first heavy run showed a 429 storm on the
+rate-limit panel. Cause: the autoscaler shells out to `docker compose up`, and without
+`SEND_RATE_*` in *its* environment, compose interpolated production limits into newly created
+replicas — which then rejected the load test. Uniform config across replicas matters, and env-var
+interpolation at scale time is a footgun; noted in docker-compose.loadtest.yml. The observability
+stack caught it in one glance — which is rather the point of having it.

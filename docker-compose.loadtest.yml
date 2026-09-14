@@ -26,5 +26,9 @@ services:
       # with SEND_RATE_CAPACITY=1000000 SEND_RATE_REFILL_PER_SEC=100000 so
       # every send exercises the full write path (the limiter still runs its
       # Redis check per request — only the rejections disappear).
+      # IMPORTANT: anything that later runs `docker compose up` for this
+      # project (including tools/autoscaler.mjs) must carry the same env, or
+      # newly created replicas interpolate the production defaults and start
+      # rejecting the load test with 429s.
       SEND_RATE_CAPACITY: ${SEND_RATE_CAPACITY:-5}
       SEND_RATE_REFILL_PER_SEC: ${SEND_RATE_REFILL_PER_SEC:-0.5}

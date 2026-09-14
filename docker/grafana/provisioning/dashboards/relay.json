@@ -1,130 +1,622 @@
 {
   "uid": "relay",
-  "title": "Relay — Load & Scaling",
+  "title": "Relay \u2014 Load & Scaling",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "5s",
-  "time": { "from": "now-15m", "to": "now" },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "panels": [
     {
-      "id": 1, "type": "stat", "title": "API replicas online",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 2 }, { "color": "green", "value": 3 } ] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [ { "expr": "count(up{job=\"relay-api\"} == 1)", "refId": "A" } ]
-    },
-    {
-      "id": 2, "type": "stat", "title": "Requests / sec",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [ { "expr": "sum(rate(relay_http_requests_total[$__rate_interval]))", "refId": "A" } ]
-    },
-    {
-      "id": 3, "type": "stat", "title": "5xx / sec",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "noValue": "0", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [ { "expr": "sum(rate(relay_http_requests_total{status=~\"5..\"}[$__rate_interval]))", "refId": "A" } ]
-    },
-    {
-      "id": 4, "type": "stat", "title": "WebSocket connections",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
-      "targets": [ { "expr": "sum(relay_ws_connections)", "refId": "A" } ]
-    },
-    {
-      "id": 5, "type": "timeseries", "title": "Requests/sec by route",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] } },
-      "targets": [ { "expr": "sum by (route) (rate(relay_http_requests_total[$__rate_interval]))", "legendFormat": "{{route}}", "refId": "A" } ]
-    },
-    {
-      "id": 6, "type": "timeseries", "title": "HTTP latency (all routes)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 5, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "id": 1,
+      "type": "stat",
+      "title": "API replicas online",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95", "refId": "B" },
-        { "expr": "histogram_quantile(0.99, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99", "refId": "C" }
+        {
+          "expr": "count(up{job=\"relay-api\"} == 1)",
+          "refId": "A"
+        }
       ]
     },
     {
-      "id": 7, "type": "timeseries", "title": "CPU per replica (cores) — autoscaler acts on this",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 10, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.7 } ] }, "custom.thresholdsStyle": { "mode": "line" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [ { "expr": "rate(process_cpu_seconds_total{job=\"relay-api\"}[$__rate_interval])", "legendFormat": "{{instance}}", "refId": "A" } ]
-    },
-    {
-      "id": 8, "type": "timeseries", "title": "Memory per replica",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [ { "expr": "process_resident_memory_bytes{job=\"relay-api\"}", "legendFormat": "{{instance}}", "refId": "A" } ]
-    },
-    {
-      "id": 9, "type": "timeseries", "title": "Replica count (scaling events)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "custom": { "fillOpacity": 20, "showPoints": "never", "lineInterpolation": "stepAfter" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "hidden" } },
-      "targets": [ { "expr": "count(up{job=\"relay-api\"} == 1)", "legendFormat": "replicas", "refId": "A" } ]
-    },
-    {
-      "id": 10, "type": "timeseries", "title": "Event-loop lag p99 per replica",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [ { "expr": "nodejs_eventloop_lag_p99_seconds{job=\"relay-api\"}", "legendFormat": "{{instance}}", "refId": "A" } ]
-    },
-    {
-      "id": 11, "type": "timeseries", "title": "Messages sent & WS deliveries /sec",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "id": 2,
+      "type": "stat",
+      "title": "Requests / sec",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
       "targets": [
-        { "expr": "sum(rate(relay_messages_sent_total[$__rate_interval]))", "legendFormat": "messages sent", "refId": "A" },
-        { "expr": "sum(rate(relay_ws_delivered_total[$__rate_interval]))", "legendFormat": "ws deliveries", "refId": "B" }
+        {
+          "expr": "sum(rate(relay_http_requests_total[$__rate_interval]))",
+          "refId": "A"
+        }
       ]
     },
     {
-      "id": 12, "type": "timeseries", "title": "Rate-limit rejections /sec by limiter",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
-      "targets": [ { "expr": "sum by (limiter) (rate(relay_rate_limited_total[$__rate_interval]))", "legendFormat": "{{limiter}}", "refId": "A" } ]
+      "id": 3,
+      "type": "stat",
+      "title": "5xx / sec",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(relay_http_requests_total{status=~\"5..\"}[$__rate_interval]))",
+          "refId": "A"
+        }
+      ]
     },
     {
-      "id": 13, "type": "timeseries", "title": "k6: virtual users (load tests only)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "none", "noValue": "no k6 run", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "hidden" } },
-      "targets": [ { "expr": "k6_vus", "legendFormat": "VUs", "refId": "A" } ]
+      "id": 4,
+      "type": "stat",
+      "title": "WebSocket connections",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "sum(relay_ws_connections)",
+          "refId": "A"
+        }
+      ]
     },
     {
-      "id": 14, "type": "timeseries", "title": "k6: requests/sec offered (load tests only)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "noValue": "no k6 run", "custom": { "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "hidden" } },
-      "targets": [ { "expr": "sum(rate(k6_http_reqs_total[$__rate_interval]))", "legendFormat": "k6 rps", "refId": "A" } ]
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests/sec by route",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(relay_http_requests_total[$__rate_interval]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "HTTP latency (all routes)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 5,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(relay_http_request_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "CPU per replica (cores) \u2014 autoscaler acts on this",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=\"relay-api\"}[$__rate_interval])",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Memory per replica",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"relay-api\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Replica count (scaling events)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "count(up{job=\"relay-api\"} == 1)",
+          "legendFormat": "replicas",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Event-loop lag p99 per replica",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "nodejs_eventloop_lag_p99_seconds{job=\"relay-api\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Messages sent & WS deliveries /sec",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(relay_messages_sent_total[$__rate_interval]))",
+          "legendFormat": "messages sent",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(relay_ws_delivered_total[$__rate_interval]))",
+          "legendFormat": "ws deliveries",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Rate-limit rejections /sec by limiter",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (limiter) (rate(relay_rate_limited_total[$__rate_interval]))",
+          "legendFormat": "{{limiter}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "k6: virtual users (load tests only)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "no k6 run",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "k6_vus",
+          "legendFormat": "VUs",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "k6: requests/sec offered (load tests only)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "no k6 run",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(k6_http_reqs_total[$__rate_interval]))",
+          "legendFormat": "k6 rps",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

@@ -28,6 +28,12 @@ static_resources:
                           route:
                             cluster: api
                             timeout: 0s
+                            # Only connection-level failures that never reached a
+                            # handler — safe for non-idempotent routes, and they
+                            # smooth over replicas joining/leaving during scaling.
+                            retry_policy:
+                              retry_on: connect-failure,refused-stream
+                              num_retries: 2
                 http_filters:
                   - name: envoy.filters.http.router
                     typed_config:
@@ -37,7 +43,11 @@ static_resources:
     - name: api
       connect_timeout: 2s
       type: STRICT_DNS
-      lb_policy: ROUND_ROBIN
+      # re-resolve fast so autoscaler-added replicas take traffic quickly
+      dns_refresh_rate: 2s
+      # route to the least-busy replica instead of blind rotation — keeps a
+      # saturated or freshly-booted (cold) replica from inflating tail latency
+      lb_policy: LEAST_REQUEST
       load_assignment:
         cluster_name: api
         endpoints:
