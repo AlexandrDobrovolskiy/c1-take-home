@@ -16,7 +16,7 @@
 
 import http from 'k6/http';
 import ws from 'k6/ws';
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import { Counter } from 'k6/metrics';
 
 const BASE = __ENV.BASE || 'http://envoy:3000';
@@ -59,12 +59,18 @@ export function setup() {
   // loop below is pure write traffic.
   const accounts = [];
   for (let i = 1; i <= USERS; i++) {
-    const login = http.post(
-      `${BASE}/api/auth/login`,
-      JSON.stringify({ username: `loaduser${i}`, password: 'load' }),
-      { headers: { 'Content-Type': 'application/json' } },
-    );
-    if (login.status !== 200) throw new Error(`login loaduser${i}: ${login.status} — did tests/load/seed.mts run?`);
+    // retry: replicas may still be joining/leaving right after a scale change
+    let login = null;
+    for (let attempt = 0; attempt < 5 && !login; attempt++) {
+      const res = http.post(
+        `${BASE}/api/auth/login`,
+        JSON.stringify({ username: `loaduser${i}`, password: 'load' }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      if (res.status === 200) login = res;
+      else sleep(1);
+    }
+    if (!login) throw new Error(`could not log in loaduser${i} — did tests/load/seed.mts run?`);
     const cookie = `relay_token=${login.cookies.relay_token[0].value}`;
     const convs = http.get(`${BASE}/api/conversations`, { headers: { Cookie: cookie } });
     const list = JSON.parse(convs.body);
