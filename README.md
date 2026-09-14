@@ -56,6 +56,7 @@ Quick taste:
 
 ```bash
 docker compose up --build          # app :3000 (alice/bob/carol, password "demo"), Grafana :3001
-docker compose exec api npm test   # 20 tests
-./tools/load-test.sh               # isolated load test + autoscaler, live dashboard on :3101
+docker compose exec api npm test   # 31 tests
+npm run load-test                  # isolated load test + autoscaler, live dashboard on :3101
+npm run dashboard                  # open the Grafana dashboard for the dev stack
 ```

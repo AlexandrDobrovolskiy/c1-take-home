@@ -6,7 +6,11 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "load-test": "./tools/load-test.sh",
+    "load-test:down": "./tools/load-test.sh down",
+    "dashboard": "./tools/open-dashboard.sh",
+    "dashboard:load": "./tools/open-dashboard.sh load"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -21,8 +21,9 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
 - **E2E** (multi-instance fan-out, typing): `docker compose exec api node tests/e2e/fanout.mjs`
   and `.../typing.mjs`
 - **Load test with live dashboard + autoscaler** (isolated stack, one command):
-  `./tools/load-test.sh` — or `PEAK=6000 ./tools/load-test.sh` to watch it scale 2→6.
-  Tear down with `./tools/load-test.sh down`.
+  `npm run load-test` — or `PEAK=6000 npm run load-test` to watch it scale 2→6.
+  Tear down with `npm run load-test:down`. Dashboards: `npm run dashboard` (dev stack) /
+  `npm run dashboard:load` (load stack).
 
 ## What was broken → fixed (details: [fixes.md](fixes.md), [auth.md](auth.md))
 
