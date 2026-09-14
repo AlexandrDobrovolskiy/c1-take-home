@@ -15,4 +15,9 @@ export const config = {
     capacity: Number(process.env.LOGIN_RATE_CAPACITY) || 10,
     refillPerSec: Number(process.env.LOGIN_RATE_REFILL_PER_SEC) || 0.5,
   },
+  // Search: generous enough for search-as-you-type, bounded per user.
+  searchRate: {
+    capacity: Number(process.env.SEARCH_RATE_CAPACITY) || 15,
+    refillPerSec: Number(process.env.SEARCH_RATE_REFILL_PER_SEC) || 5,
+  },
 };

@@ -3,7 +3,7 @@ import os from 'node:os';
 import express from 'express';
 import { config } from './config.ts';
 import { waitForMysql } from './db/mysql.ts';
-import { connectMongo } from './db/mongo.ts';
+import { connectMongo, ensureMongoIndexes } from './db/mongo.ts';
 import { connectRedis } from './db/redis.ts';
 import { requireAuth } from './auth/middleware.ts';
 import { authRouter } from './routes/auth.ts';
@@ -42,6 +42,7 @@ attachWs(server);
 
 await waitForMysql();
 await connectMongo();
+await ensureMongoIndexes();
 await connectRedis();
 await startFanout();
 

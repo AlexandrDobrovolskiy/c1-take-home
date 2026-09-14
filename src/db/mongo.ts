@@ -25,3 +25,10 @@ export function mongo(): Db {
 export async function closeMongo(): Promise<void> {
   await client.close();
 }
+
+// Idempotent; safe when several instances race it at startup.
+export async function ensureMongoIndexes(): Promise<void> {
+  const bodies = mongo().collection('message_bodies');
+  await bodies.createIndex({ body: 'text' }); // word/stem search with relevance scores
+  await bodies.createIndex({ conversationId: 1 }); // scoped scans (search fallback, cleanups)
+}

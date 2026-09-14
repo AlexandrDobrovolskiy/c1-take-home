@@ -98,21 +98,36 @@ async function resync() {
   if (c) await openConversation(c.id, c.title);
 }
 
-async function openConversation(id, title) {
+// aroundId (optional): open the conversation at that message — the page
+// *ending* with it — highlighted, with a way back to the latest messages.
+async function openConversation(id, title, aroundId) {
   activeConversation = id;
   const c = conversations.find((x) => x.id === id);
   if (c) c.unread = false;
   renderSidebar();
 
   document.getElementById('title').textContent = title;
-  const res = await fetch(`/api/messages?conversationId=${id}`);
+  const cursor = aroundId ? `&before=${aroundId + 1}` : '';
+  const res = await fetch(`/api/messages?conversationId=${id}${cursor}`);
   if (!res.ok) return;
   const page = await res.json();
   nextCursor = page.nextCursor;
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
   renderOlderButton(pane);
-  for (const m of page.messages) appendMessage(m);
+  for (const m of page.messages) {
+    const div = messageDiv(m);
+    if (m.id === aroundId) div.classList.add('target');
+    pane.appendChild(div);
+  }
+  pane.scrollTop = pane.scrollHeight;
+  if (aroundId) {
+    const latest = document.createElement('button');
+    latest.id = 'jumpLatest';
+    latest.textContent = '↓ Jump to latest';
+    latest.onclick = () => openConversation(id, title);
+    pane.appendChild(latest);
+  }
 }
 
 function renderOlderButton(pane) {
@@ -205,20 +220,43 @@ document.getElementById('newConv').onclick = async () => {
   await loadConversations();
 };
 
-document.getElementById('searchForm').onsubmit = async (e) => {
+// Telegram-style: one query searches chats and messages together,
+// live as you type (debounced), results grouped by kind.
+let searchTimer;
+let searchSeq = 0;
+
+document.getElementById('search').oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 300);
+};
+document.getElementById('searchForm').onsubmit = (e) => {
   e.preventDefault();
-  const q = document.getElementById('search').value.trim();
-  if (!q) return;
-  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  renderResults(q, await res.json());
+  clearTimeout(searchTimer);
+  runSearch();
 };
 
-function renderResults(q, results) {
+async function runSearch() {
+  const q = document.getElementById('search').value.trim();
+  if (q.length < 2) return;
+  const seq = ++searchSeq;
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  if (!res.ok || seq !== searchSeq) return; // stale response — a newer query is in flight
+  renderResults(q, await res.json());
+}
+
+function sectionLabel(text) {
+  const el = document.createElement('div');
+  el.className = 'section-label';
+  el.textContent = text;
+  return el;
+}
+
+function renderResults(q, { conversations: convHits, messages: msgHits }) {
   activeConversation = null;
   document.getElementById('title').textContent = `Search: "${q}"`;
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
-  if (!results.length) {
+  if (!convHits.length && !msgHits.length) {
     const empty = document.createElement('div');
     empty.className = 'msg';
     empty.style.color = '#888';
@@ -226,16 +264,34 @@ function renderResults(q, results) {
     pane.appendChild(empty);
     return;
   }
-  for (const r of results) {
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.style.cursor = 'pointer';
-    const title = document.createElement('strong');
-    title.textContent = r.conversationTitle ?? '#' + r.conversationId;
-    div.append(title, ' — ' + (r.body ?? ''));
-    div.onclick = () => openConversation(r.conversationId, r.conversationTitle ?? '#' + r.conversationId);
-    pane.appendChild(div);
+  if (convHits.length) {
+    pane.appendChild(sectionLabel('Chats'));
+    for (const c of convHits) {
+      const div = document.createElement('div');
+      div.className = 'msg result';
+      const title = document.createElement('strong');
+      title.textContent = c.title;
+      div.appendChild(title);
+      div.onclick = () => openConversation(c.id, c.title);
+      pane.appendChild(div);
+    }
   }
+  if (msgHits.length) {
+    pane.appendChild(sectionLabel('Messages'));
+    for (const m of msgHits) {
+      const div = document.createElement('div');
+      div.className = 'msg result';
+      const title = document.createElement('strong');
+      title.textContent = m.conversationTitle;
+      const meta = document.createElement('div');
+      meta.className = 'result-meta';
+      meta.textContent = `${m.senderUsername}: ${m.body}`;
+      div.append(title, meta);
+      div.onclick = () => openConversation(m.conversationId, m.conversationTitle, m.messageId);
+      pane.appendChild(div);
+    }
+  }
+  pane.scrollTop = 0;
 }
 
 document.getElementById('loginForm').onsubmit = async (e) => {
