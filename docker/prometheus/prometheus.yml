@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # DNS A-record discovery on the compose network: every api replica the
+  # service name resolves to gets scraped, so scaled-up replicas appear on the
+  # dashboard automatically (same mechanism Envoy uses for load balancing).
+  - job_name: relay-api
+    dns_sd_configs:
+      - names: ["api"]
+        type: A
+        port: 3000
+    metrics_path: /metrics
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -11,6 +11,7 @@ import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
 import { attachWs, startFanout } from './ws/hub.ts';
+import { metricsHandler, metricsMiddleware } from './metrics.ts';
 
 // Which replica served a request — useful when running multiple instances.
 const INSTANCE = os.hostname();
@@ -21,6 +22,9 @@ app.use((_req, res, next) => {
   res.set('X-Instance', INSTANCE);
   next();
 });
+app.use(metricsMiddleware);
+// Scraped by Prometheus over the internal network; Envoy 404s it at the edge.
+app.get('/metrics', metricsHandler);
 app.use(express.json());
 app.use(express.static('web'));
 

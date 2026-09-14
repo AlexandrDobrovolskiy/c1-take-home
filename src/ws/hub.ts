@@ -4,6 +4,7 @@ import { verifyToken } from '../auth/tokens.ts';
 import { tokenFromCookies } from '../auth/middleware.ts';
 import { participantConversations } from '../services/participants.ts';
 import { redisPub, redisSub } from '../db/redis.ts';
+import { wsConnections, wsDelivered } from '../metrics.ts';
 
 type Client = WebSocket & {
   subs?: Set<number>;
@@ -45,6 +46,7 @@ function deliverLocal(conversationId: number, data: string): void {
   for (const ws of clients) {
     if (ws.subs?.has(conversationId) && ws.readyState === WebSocket.OPEN) {
       ws.send(data);
+      wsDelivered.inc();
     }
   }
 }
@@ -83,6 +85,7 @@ export function attachWs(server: Server): void {
       ws.isAlive = true;
     });
     clients.add(ws);
+    wsConnections.inc();
     ws.on('message', async (raw) => {
       try {
         const m = JSON.parse(raw.toString());
@@ -113,7 +116,10 @@ export function attachWs(server: Server): void {
         /* ignore malformed frames */
       }
     });
-    ws.on('close', () => clients.delete(ws));
+    ws.on('close', () => {
+      clients.delete(ws);
+      wsConnections.dec();
+    });
   });
 }
 

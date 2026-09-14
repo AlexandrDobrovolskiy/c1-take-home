@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import { redisPub } from '../db/redis.ts';
+import { rateLimited } from '../metrics.ts';
 import { wrap } from './wrap.ts';
 
 // Token bucket in Redis, evaluated atomically as a Lua script: state lives in
@@ -71,14 +72,16 @@ export async function consume(key: string, opts: RateLimitOptions): Promise<Rate
 // worth taking the product down for.
 export function rateLimit(opts: RateLimitOptions & { key: (req: Request) => string }): RequestHandler {
   return wrap(async (req, res, next) => {
+    const key = opts.key(req);
     let result: RateLimitResult;
     try {
-      result = await consume(opts.key(req), opts);
+      result = await consume(key, opts);
     } catch (err) {
       console.error('rate limiter unavailable, allowing request:', err);
       return next();
     }
     if (!result.allowed) {
+      rateLimited.inc({ limiter: key.split(':', 1)[0] });
       res.set('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterS))));
       return res.status(429).json({ error: 'rate limit exceeded, retry later' });
     }

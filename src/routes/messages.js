@@ -5,6 +5,7 @@ import { isParticipant } from '../services/participants.ts';
 import { broadcast } from '../ws/hub.ts';
 import { rateLimit } from '../lib/rateLimit.ts';
 import { wrap } from '../lib/wrap.ts';
+import { messagesSent } from '../metrics.ts';
 
 const MAX_BODY_LENGTH = 4000;
 
@@ -44,6 +45,7 @@ messagesRouter.post(
     // Sender username comes straight from the token — no extra lookup.
     const out = { ...msg, senderUsername: req.user.username };
     await broadcast(out.conversationId, { type: 'message', ...out });
+    messagesSent.inc();
     res.status(201).json(out);
   }),
 );

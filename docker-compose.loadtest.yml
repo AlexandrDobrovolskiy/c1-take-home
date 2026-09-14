@@ -9,6 +9,8 @@
 services:
   envoy:
     ports: !override ["3100:3000"]
+  grafana:
+    ports: !override ["3101:3000"]
   mysql:
     ports: !override []
   mongo:

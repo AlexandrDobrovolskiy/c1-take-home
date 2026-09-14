@@ -21,6 +21,9 @@ static_resources:
                     - name: app
                       domains: ["*"]
                       routes:
+                        # metrics are for the internal Prometheus scraper only
+                        - match: { path: "/metrics" }
+                          direct_response: { status: 404, body: { inline_string: "not found\n" } }
                         - match: { prefix: "/" }
                           route:
                             cluster: api
