@@ -11,7 +11,9 @@ services:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
-    command: npm start
+    # tsx directly (not `npm start`): npm as PID 1 swallows SIGTERM instead of
+    # letting the app's graceful-drain handler run
+    command: ["node_modules/.bin/tsx", "src/index.ts"]
     restart: unless-stopped
     env_file: .env
     expose: ["3000"]
