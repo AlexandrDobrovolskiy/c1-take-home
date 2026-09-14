@@ -1,10 +1,48 @@
-const userId = 1;
+let me = null;
 let ws;
+let wsRetry = 0;
 let activeConversation;
+let nextCursor = null;
 let conversations = [];
+// Guards against stale async responses clobbering the current view: bump on
+// every navigation, re-check after every await before touching the DOM.
+let viewSeq = 0;
+let renderedIds = new Set(); // message ids in the pane — dedups WS echo vs fetch overlap
+let loadingOlder = false;
+let pendingSend = null; // { body, clientId } — a failed send retries with the SAME clientId
+const readMarkAt = new Map(); // conversationId -> highest lastMessageId already reported read
+
+function markRead(conversationId, lastMessageId) {
+  if (!lastMessageId) return;
+  if ((readMarkAt.get(conversationId) ?? 0) >= lastMessageId) return;
+  readMarkAt.set(conversationId, lastMessageId);
+  fetch(`/api/conversations/${conversationId}/read`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lastMessageId }),
+  }).catch(() => {});
+}
+
+async function init() {
+  const res = await fetch('/api/auth/me');
+  if (res.ok) {
+    me = await res.json();
+    showApp();
+  } else {
+    document.getElementById('login').hidden = false;
+  }
+}
+
+function showApp() {
+  document.getElementById('login').hidden = true;
+  document.getElementById('userName').textContent = me.username;
+  loadConversations();
+}
 
 async function loadConversations() {
-  const res = await fetch(`/api/conversations?userId=${userId}`);
+  const res = await fetch('/api/conversations');
+  if (res.status === 401) return location.reload(); // session expired -> login screen
+  if (!res.ok) throw new Error(`failed to load conversations: ${res.status}`);
   conversations = await res.json();
   renderSidebar();
   connectWs();
@@ -16,52 +54,226 @@ function renderSidebar() {
   for (const c of conversations) {
     const li = document.createElement('li');
     if (c.id === activeConversation) li.className = 'active';
-    li.innerHTML =
-      `<span>${c.title} (${c.messageCount})</span>` + (c.unread ? '<span class="dot">●</span>' : '');
+    const label = document.createElement('span');
+    label.textContent = `${c.title} (${c.messageCount})`;
+    li.appendChild(label);
+    if (c.id !== activeConversation && typers.get(c.id)?.size) {
+      const hint = document.createElement('span');
+      hint.className = 'typing-hint';
+      hint.textContent = 'typing…';
+      li.appendChild(hint);
+    }
+    if (c.unread) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.textContent = '●';
+      li.appendChild(dot);
+    }
     li.onclick = () => openConversation(c.id, c.title);
     list.appendChild(li);
   }
 }
 
 function connectWs() {
-  if (ws) ws.close();
+  if (ws) {
+    ws.onclose = null; // deliberate replacement, not a drop — don't reconnect
+    ws.close();
+  }
   ws = new WebSocket(`ws://${location.host}/`);
-  ws.onopen = () =>
+  ws.onopen = () => {
+    wsRetry = 0;
     ws.send(JSON.stringify({ type: 'subscribe', conversationIds: conversations.map((c) => c.id) }));
+  };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.type === 'subscribed') {
+      // Delivery is live from this moment. Re-fetch the open conversation so
+      // anything that landed between (re)connect and now is not lost.
+      if (activeConversation) {
+        const c = conversations.find((x) => x.id === activeConversation);
+        if (c) openConversation(c.id, c.title);
+      }
+      return;
+    }
+    if (msg.type === 'conversation') {
+      // Added to a new conversation — refresh the sidebar and resubscribe.
+      loadConversations();
+      return;
+    }
+    if (msg.type === 'typing') {
+      noteTyping(msg.conversationId, msg.username);
+      return;
+    }
     if (msg.type !== 'message') return;
+    stopTyping(msg.conversationId, msg.senderUsername); // their message arrived
     const c = conversations.find((x) => x.id === msg.conversationId);
     if (c) c.messageCount += 1;
     if (msg.conversationId === activeConversation) {
       appendMessage(msg);
+      markRead(msg.conversationId, msg.id); // watching it = reading it
     } else if (c) {
       c.unread = true;
     }
     renderSidebar();
   };
+  ws.onclose = (ev) => {
+    if (ev.code === 4401) return location.reload(); // auth rejected -> login screen
+    scheduleReconnect();
+  };
 }
 
-async function openConversation(id, title) {
+function scheduleReconnect() {
+  const delay = Math.min(15_000, 1000 * 2 ** wsRetry++);
+  setTimeout(async () => {
+    try {
+      await resync();
+    } catch {
+      scheduleReconnect(); // server still down — back off and retry
+    }
+  }, delay);
+}
+
+// After an outage: refresh sidebar counts and reconnect. The open conversation
+// is re-fetched when the server ACKs the new subscription ('subscribed'), so
+// no message can fall between reconnect and resubscribe.
+async function resync() {
+  await loadConversations();
+}
+
+// aroundId (optional): open the conversation at that message — the page
+// *ending* with it — highlighted, with a way back to the latest messages.
+async function openConversation(id, title, aroundId) {
+  const seq = ++viewSeq;
   activeConversation = id;
   const c = conversations.find((x) => x.id === id);
   if (c) c.unread = false;
   renderSidebar();
 
   document.getElementById('title').textContent = title;
-  const res = await fetch(`/api/messages?conversationId=${id}`);
-  const messages = await res.json();
+  const cursor = aroundId ? `&before=${aroundId + 1}` : '';
+  const res = await fetch(`/api/messages?conversationId=${id}${cursor}`);
+  if (!res.ok || seq !== viewSeq) return; // user navigated away meanwhile
+  const page = await res.json();
+  if (seq !== viewSeq) return;
+  nextCursor = page.nextCursor;
+  renderedIds = new Set(page.messages.map((m) => m.id));
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
-  for (const m of messages) appendMessage(m);
+  renderOlderButton(pane);
+  for (const m of page.messages) {
+    const div = messageDiv(m);
+    if (m.id === aroundId) div.classList.add('target');
+    pane.appendChild(div);
+  }
+  pane.scrollTop = pane.scrollHeight;
+  renderTyping();
+  if (!aroundId) markRead(id, page.messages.at(-1)?.id);
+  if (aroundId) {
+    const latest = document.createElement('button');
+    latest.id = 'jumpLatest';
+    latest.textContent = '↓ Jump to latest';
+    latest.onclick = () => openConversation(id, title);
+    pane.appendChild(latest);
+  }
+}
+
+function renderOlderButton(pane) {
+  document.getElementById('loadOlder')?.remove();
+  if (!nextCursor) return;
+  const btn = document.createElement('button');
+  btn.id = 'loadOlder';
+  btn.textContent = 'Load older messages';
+  btn.onclick = loadOlder;
+  pane.prepend(btn);
+}
+
+async function loadOlder() {
+  if (loadingOlder || !nextCursor || !activeConversation) return; // double-click / stale guards
+  loadingOlder = true;
+  const seq = viewSeq;
+  try {
+    const res = await fetch(`/api/messages?conversationId=${activeConversation}&before=${nextCursor}`);
+    if (!res.ok || seq !== viewSeq) return; // user switched views mid-flight
+    const page = await res.json();
+    if (seq !== viewSeq) return;
+    nextCursor = page.nextCursor;
+    const pane = document.getElementById('messages');
+    const prevHeight = pane.scrollHeight;
+    const anchor = document.getElementById('loadOlder')?.nextSibling ?? pane.firstChild;
+    for (const m of page.messages) {
+      if (renderedIds.has(m.id)) continue;
+      renderedIds.add(m.id);
+      pane.insertBefore(messageDiv(m), anchor);
+    }
+    renderOlderButton(pane);
+    pane.scrollTop += pane.scrollHeight - prevHeight; // keep view anchored
+  } finally {
+    loadingOlder = false;
+  }
+}
+
+// --- typing indicators: conversationId -> Map(username -> expiry). Entries
+// self-expire after TYPING_TTL unless refreshed by another typing event.
+const typers = new Map();
+const TYPING_TTL = 3000;
+
+function noteTyping(conversationId, username) {
+  if (!username || username === me?.username) return;
+  let conv = typers.get(conversationId);
+  if (!conv) {
+    conv = new Map();
+    typers.set(conversationId, conv);
+  }
+  conv.set(username, Date.now() + TYPING_TTL);
+  setTimeout(pruneTyping, TYPING_TTL + 50);
+  renderTyping();
+}
+
+function stopTyping(conversationId, username) {
+  typers.get(conversationId)?.delete(username);
+  renderTyping();
+}
+
+function pruneTyping() {
+  const now = Date.now();
+  for (const [convId, conv] of typers) {
+    for (const [username, expiry] of conv) if (expiry <= now) conv.delete(username);
+    if (!conv.size) typers.delete(convId);
+  }
+  renderTyping();
+}
+
+function renderTyping() {
+  const names = [...(typers.get(activeConversation)?.keys() ?? [])];
+  document.getElementById('typing').textContent = names.length
+    ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…`
+    : '';
+  renderSidebar(); // sidebar shows a typing hint for the other conversations
+}
+
+const lastTypingSentAt = new Map(); // per conversation — switching rooms mustn't suppress it
+document.getElementById('text').oninput = () => {
+  if (!activeConversation || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const now = Date.now();
+  if (now - (lastTypingSentAt.get(activeConversation) ?? 0) < 2000) return; // refreshes before the 3s TTL lapses
+  lastTypingSentAt.set(activeConversation, now);
+  ws.send(JSON.stringify({ type: 'typing', conversationId: activeConversation }));
+};
+
+function messageDiv(m) {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.textContent = `${m.senderUsername ?? '#' + m.senderId}: ${m.body}`;
+  return div;
 }
 
 function appendMessage(m) {
+  if (m.id) {
+    if (renderedIds.has(m.id)) return; // already in the pane (fetch/WS overlap)
+    renderedIds.add(m.id);
+  }
   const pane = document.getElementById('messages');
-  const div = document.createElement('div');
-  div.className = 'msg';
-  div.textContent = `#${m.senderId}: ${m.body}`;
-  pane.appendChild(div);
+  pane.appendChild(messageDiv(m));
   pane.scrollTop = pane.scrollHeight;
 }
 
@@ -70,44 +282,104 @@ document.getElementById('composer').onsubmit = async (e) => {
   const input = document.getElementById('text');
   const body = input.value.trim();
   if (!body || !activeConversation) return;
+  // A retry of a failed send reuses the SAME clientId, so the server's
+  // idempotency key actually protects against user-driven duplicates.
+  const clientId =
+    pendingSend && pendingSend.body === body ? pendingSend.clientId : crypto.randomUUID();
   input.value = '';
-  await fetch('/api/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      conversationId: activeConversation,
-      senderId: userId,
-      body,
-      clientId: crypto.randomUUID(),
-    }),
-  });
+  let res;
+  try {
+    res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: activeConversation, body, clientId }),
+    });
+  } catch {
+    res = null; // network failure — same retry path
+  }
+  if (!res || !res.ok) {
+    pendingSend = { body, clientId };
+    input.value = body; // don't lose what they typed
+    if (res && res.status === 429) {
+      const wait = res.headers.get('Retry-After') || 'a few';
+      flashComposer(`Sending too fast — retry in ${wait}s`);
+    } else {
+      flashComposer('Send failed — press Enter to retry');
+    }
+    return;
+  }
+  pendingSend = null;
 };
+
+function flashComposer(text) {
+  const input = document.getElementById('text');
+  input.classList.add('throttled');
+  const prev = input.placeholder;
+  input.placeholder = text;
+  setTimeout(() => {
+    input.classList.remove('throttled');
+    input.placeholder = prev;
+  }, 2500);
+}
 
 document.getElementById('newConv').onclick = async () => {
   const title = prompt('Conversation title?');
   if (!title) return;
-  await fetch('/api/conversations', {
+  const invite = prompt('Invite usernames (comma-separated)?', '') || '';
+  const participantUsernames = invite.split(',').map((s) => s.trim()).filter(Boolean);
+  const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, participantIds: [userId, 2] }),
+    body: JSON.stringify({ title, participantUsernames }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    console.error('failed to create conversation:', err.error || res.status);
+    return;
+  }
   await loadConversations();
 };
 
-document.getElementById('searchForm').onsubmit = async (e) => {
+// Telegram-style: one query searches chats and messages together,
+// live as you type (debounced), results grouped by kind.
+let searchTimer;
+let searchSeq = 0;
+
+document.getElementById('search').oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 300);
+};
+document.getElementById('searchForm').onsubmit = (e) => {
   e.preventDefault();
-  const q = document.getElementById('search').value.trim();
-  if (!q) return;
-  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  renderResults(q, await res.json());
+  clearTimeout(searchTimer);
+  runSearch();
 };
 
-function renderResults(q, results) {
+async function runSearch() {
+  const q = document.getElementById('search').value.trim();
+  if (q.length < 2) return;
+  const seq = ++searchSeq;
+  const nav = viewSeq; // if the user opens a conversation meanwhile, drop the result
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  if (!res.ok || seq !== searchSeq || nav !== viewSeq) return;
+  renderResults(q, await res.json());
+}
+
+function sectionLabel(text) {
+  const el = document.createElement('div');
+  el.className = 'section-label';
+  el.textContent = text;
+  return el;
+}
+
+function renderResults(q, { conversations: convHits, messages: msgHits }) {
+  viewSeq++; // the pane now belongs to search results
   activeConversation = null;
+  renderedIds = new Set();
   document.getElementById('title').textContent = `Search: "${q}"`;
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
-  if (!results.length) {
+  if (!convHits.length && !msgHits.length) {
     const empty = document.createElement('div');
     empty.className = 'msg';
     empty.style.color = '#888';
@@ -115,16 +387,58 @@ function renderResults(q, results) {
     pane.appendChild(empty);
     return;
   }
-  for (const r of results) {
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.style.cursor = 'pointer';
-    const title = document.createElement('strong');
-    title.textContent = r.conversationTitle ?? '#' + r.conversationId;
-    div.append(title, ' — ' + (r.body ?? ''));
-    div.onclick = () => openConversation(r.conversationId, r.conversationTitle ?? '#' + r.conversationId);
-    pane.appendChild(div);
+  if (convHits.length) {
+    pane.appendChild(sectionLabel('Chats'));
+    for (const c of convHits) {
+      const div = document.createElement('div');
+      div.className = 'msg result';
+      const title = document.createElement('strong');
+      title.textContent = c.title;
+      div.appendChild(title);
+      div.onclick = () => openConversation(c.id, c.title);
+      pane.appendChild(div);
+    }
   }
+  if (msgHits.length) {
+    pane.appendChild(sectionLabel('Messages'));
+    for (const m of msgHits) {
+      const div = document.createElement('div');
+      div.className = 'msg result';
+      const title = document.createElement('strong');
+      title.textContent = m.conversationTitle;
+      const meta = document.createElement('div');
+      meta.className = 'result-meta';
+      meta.textContent = `${m.senderUsername}: ${m.body}`;
+      div.append(title, meta);
+      div.onclick = () => openConversation(m.conversationId, m.conversationTitle, m.messageId);
+      pane.appendChild(div);
+    }
+  }
+  pane.scrollTop = 0;
 }
 
-loadConversations();
+document.getElementById('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: document.getElementById('loginUser').value.trim(),
+      password: document.getElementById('loginPass').value,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    document.getElementById('loginError').textContent = err.error || 'login failed';
+    return;
+  }
+  me = await res.json();
+  showApp();
+};
+
+document.getElementById('logout').onclick = async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.reload();
+};
+
+init();

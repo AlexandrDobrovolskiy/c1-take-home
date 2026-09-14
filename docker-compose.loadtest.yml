@@ -1,0 +1,32 @@
+# Isolated load-testing stack — never touches the dev stack or its data.
+#
+#   docker compose -p relay-load -f docker-compose.yml -f docker-compose.loadtest.yml up -d --build
+#   docker compose -p relay-load -f docker-compose.yml -f docker-compose.loadtest.yml exec api npx tsx tests/load/seed.mts
+#   docker run --rm --network relay-load_default -v "$PWD/tests/load:/scripts:ro" grafana/k6 run /scripts/k6.js
+#
+# No host ports are published except Envoy on 3100 (debugging); k6 joins the
+# network and talks to envoy:3000 directly.
+services:
+  envoy:
+    ports: !override ["3100:3000"]
+  grafana:
+    ports: !override ["3101:3000"]
+  mysql:
+    ports: !override []
+  api:
+    environment:
+      # The load generator is a single IP; production per-IP login limits would
+      # throttle test *setup*, not anything we're measuring. Send/search limits
+      # stay at production defaults on purpose.
+      LOGIN_RATE_CAPACITY: "1000"
+      LOGIN_RATE_REFILL_PER_SEC: "100"
+      # Write-throughput mode (tests/load/k6-throughput.js): start the stack
+      # with SEND_RATE_CAPACITY=1000000 SEND_RATE_REFILL_PER_SEC=100000 so
+      # every send exercises the full write path (the limiter still runs its
+      # Redis check per request — only the rejections disappear).
+      # IMPORTANT: anything that later runs `docker compose up` for this
+      # project (including tools/autoscaler.mjs) must carry the same env, or
+      # newly created replicas interpolate the production defaults and start
+      # rejecting the load test with 429s.
+      SEND_RATE_CAPACITY: ${SEND_RATE_CAPACITY:-5}
+      SEND_RATE_REFILL_PER_SEC: ${SEND_RATE_REFILL_PER_SEC:-0.5}

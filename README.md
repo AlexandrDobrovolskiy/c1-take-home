@@ -42,3 +42,21 @@ Then open <http://localhost:3000>. It seeds a couple of demo users and conversat
 - Use whatever tools and setup you normally work with.
 - Send us **just the link to your repo**, plus a short note on what you changed and why — what was
   broken, what you fixed, what you built.
+
+---
+
+## What changed in this fork
+
+All four tasks are built, the bugs are found and fixed (test-first), plus load testing,
+autoscaling, and a live Grafana dashboard. **Start at [`docs/00-overview.md`](docs/00-overview.md)** —
+it links every write-up and lists the verification commands. The original assessment/plan is in
+[`spec/assessment.md`](spec/assessment.md).
+
+Quick taste:
+
+```bash
+docker compose up --build          # app :3000 (alice/bob/carol, password "demo"), Grafana :3001
+docker compose exec api npm test   # 31 tests
+npm run load-test                  # isolated load test + autoscaler, live dashboard on :3101
+npm run dashboard                  # open the Grafana dashboard for the dev stack
+```

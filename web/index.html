@@ -18,11 +18,31 @@
     #main { flex: 1; display: flex; flex-direction: column; }
     #title { padding: 12px; margin: 0; border-bottom: 1px solid #ddd; }
     #messages { flex: 1; overflow-y: auto; padding: 12px; }
+    #loadOlder, #jumpLatest { display: block; margin: 0 auto 8px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
+    #jumpLatest { margin-top: 8px; }
+    .section-label { font-size: 12px; text-transform: uppercase; color: #888; margin: 12px 0 4px; }
+    .msg.result { cursor: pointer; padding: 8px; border-radius: 6px; }
+    .msg.result:hover { background: #f6f6f6; }
+    .result-meta { color: #555; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .msg.target { background: #fff3bf; border-radius: 6px; padding: 6px 8px; }
+    #typing { min-height: 18px; padding: 0 12px 4px; font-size: 13px; font-style: italic; color: #888; }
+    .typing-hint { font-size: 12px; font-style: italic; color: #4a7dcf; margin-left: 6px; }
     .msg { padding: 6px 0; }
     #composer { display: flex; border-top: 1px solid #ddd; padding: 8px; gap: 8px; }
     #text { flex: 1; padding: 8px; }
+    #text.throttled { outline: 2px solid #e5484d; }
     #searchForm { padding: 0 12px 12px; }
     #search { width: 100%; box-sizing: border-box; padding: 6px 8px; }
+    #whoami { padding: 8px 12px; border-top: 1px solid #ddd; font-size: 13px; color: #555; display: flex; justify-content: space-between; margin-top: auto; }
+    #sidebar { display: flex; flex-direction: column; }
+    #conversations { flex: 1; overflow-y: auto; }
+    #logout { cursor: pointer; color: #888; background: none; border: none; font-size: 13px; padding: 0; }
+    #login { position: fixed; inset: 0; background: #fff; display: flex; align-items: center; justify-content: center; }
+    #login[hidden] { display: none; }
+    #loginForm { display: flex; flex-direction: column; gap: 8px; width: 260px; }
+    #loginForm input { padding: 8px; }
+    #loginError { color: #e5484d; font-size: 13px; min-height: 1em; }
+    #loginForm .hint { color: #888; font-size: 12px; margin: 0; }
   </style>
 </head>
 <body>
@@ -33,13 +53,25 @@
     </header>
     <form id="searchForm"><input id="search" autocomplete="off" placeholder="Search messages…" /></form>
     <ul id="conversations"></ul>
+    <div id="whoami"><span id="userName"></span><button id="logout">log out</button></div>
   </div>
   <div id="main">
     <h3 id="title">Pick a conversation</h3>
     <div id="messages"></div>
+    <div id="typing"></div>
     <form id="composer">
       <input id="text" autocomplete="off" placeholder="Message…" />
       <button>Send</button>
+    </form>
+  </div>
+  <div id="login" hidden>
+    <form id="loginForm">
+      <h3>Sign in to Relay</h3>
+      <input id="loginUser" autocomplete="username" placeholder="Username" />
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="Password" />
+      <button>Sign in</button>
+      <div id="loginError"></div>
+      <p class="hint">Demo users: alice, bob, carol — password “demo”.</p>
     </form>
   </div>
   <script src="/app.js"></script>
