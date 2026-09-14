@@ -5,7 +5,13 @@ import { tokenFromCookies } from '../auth/middleware.ts';
 import { participantConversations } from '../services/participants.ts';
 import { redisPub, redisSub } from '../db/redis.ts';
 
-type Client = WebSocket & { subs?: Set<number>; userId?: number; isAlive?: boolean };
+type Client = WebSocket & {
+  subs?: Set<number>;
+  userId?: number;
+  username?: string;
+  isAlive?: boolean;
+  lastTypingAt?: Map<number, number>;
+};
 
 const clients = new Set<Client>();
 
@@ -70,6 +76,7 @@ export function attachWs(server: Server): void {
       return;
     }
     ws.userId = payload.uid;
+    ws.username = payload.username;
     ws.subs = new Set();
     ws.isAlive = true;
     ws.on('pong', () => {
@@ -85,6 +92,22 @@ export function attachWs(server: Server): void {
           );
           // Only subscribe to conversations the user is actually a member of.
           ws.subs = new Set(await participantConversations(ws.userId!, requested));
+        } else if (m.type === 'typing') {
+          // Ephemeral event — fanned out over the bus like messages, never
+          // stored. `subs` only ever contains membership-verified ids, so it
+          // doubles as the authorization check (no DB hit on this hot path).
+          const convId = Number(m.conversationId);
+          if (!ws.subs?.has(convId)) return;
+          const now = Date.now();
+          ws.lastTypingAt ??= new Map();
+          if (now - (ws.lastTypingAt.get(convId) ?? 0) < 1000) return; // spam guard
+          ws.lastTypingAt.set(convId, now);
+          await broadcast(convId, {
+            type: 'typing',
+            conversationId: convId,
+            userId: ws.userId,
+            username: ws.username,
+          });
         }
       } catch {
         /* ignore malformed frames */

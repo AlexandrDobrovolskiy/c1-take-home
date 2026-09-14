@@ -39,6 +39,12 @@ function renderSidebar() {
     const label = document.createElement('span');
     label.textContent = `${c.title} (${c.messageCount})`;
     li.appendChild(label);
+    if (c.id !== activeConversation && typers.get(c.id)?.size) {
+      const hint = document.createElement('span');
+      hint.className = 'typing-hint';
+      hint.textContent = 'typing…';
+      li.appendChild(hint);
+    }
     if (c.unread) {
       const dot = document.createElement('span');
       dot.className = 'dot';
@@ -62,7 +68,12 @@ function connectWs() {
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.type === 'typing') {
+      noteTyping(msg.conversationId, msg.username);
+      return;
+    }
     if (msg.type !== 'message') return;
+    stopTyping(msg.conversationId, msg.senderUsername); // their message arrived
     const c = conversations.find((x) => x.id === msg.conversationId);
     if (c) c.messageCount += 1;
     if (msg.conversationId === activeConversation) {
@@ -121,6 +132,7 @@ async function openConversation(id, title, aroundId) {
     pane.appendChild(div);
   }
   pane.scrollTop = pane.scrollHeight;
+  renderTyping();
   if (aroundId) {
     const latest = document.createElement('button');
     latest.id = 'jumpLatest';
@@ -153,6 +165,54 @@ async function loadOlder() {
   renderOlderButton(pane);
   pane.scrollTop += pane.scrollHeight - prevHeight; // keep view anchored
 }
+
+// --- typing indicators: conversationId -> Map(username -> expiry). Entries
+// self-expire after TYPING_TTL unless refreshed by another typing event.
+const typers = new Map();
+const TYPING_TTL = 3000;
+
+function noteTyping(conversationId, username) {
+  if (!username || username === me?.username) return;
+  let conv = typers.get(conversationId);
+  if (!conv) {
+    conv = new Map();
+    typers.set(conversationId, conv);
+  }
+  conv.set(username, Date.now() + TYPING_TTL);
+  setTimeout(pruneTyping, TYPING_TTL + 50);
+  renderTyping();
+}
+
+function stopTyping(conversationId, username) {
+  typers.get(conversationId)?.delete(username);
+  renderTyping();
+}
+
+function pruneTyping() {
+  const now = Date.now();
+  for (const [convId, conv] of typers) {
+    for (const [username, expiry] of conv) if (expiry <= now) conv.delete(username);
+    if (!conv.size) typers.delete(convId);
+  }
+  renderTyping();
+}
+
+function renderTyping() {
+  const names = [...(typers.get(activeConversation)?.keys() ?? [])];
+  document.getElementById('typing').textContent = names.length
+    ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…`
+    : '';
+  renderSidebar(); // sidebar shows a typing hint for the other conversations
+}
+
+let lastTypingSentAt = 0;
+document.getElementById('text').oninput = () => {
+  if (!activeConversation || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const now = Date.now();
+  if (now - lastTypingSentAt < 2000) return; // server refreshes ~before the 3s TTL lapses
+  lastTypingSentAt = now;
+  ws.send(JSON.stringify({ type: 'typing', conversationId: activeConversation }));
+};
 
 function messageDiv(m) {
   const div = document.createElement('div');

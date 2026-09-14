@@ -25,6 +25,8 @@
     .msg.result:hover { background: #f6f6f6; }
     .result-meta { color: #555; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .msg.target { background: #fff3bf; border-radius: 6px; padding: 6px 8px; }
+    #typing { min-height: 18px; padding: 0 12px 4px; font-size: 13px; font-style: italic; color: #888; }
+    .typing-hint { font-size: 12px; font-style: italic; color: #4a7dcf; margin-left: 6px; }
     .msg { padding: 6px 0; }
     #composer { display: flex; border-top: 1px solid #ddd; padding: 8px; gap: 8px; }
     #text { flex: 1; padding: 8px; }
@@ -56,6 +58,7 @@
   <div id="main">
     <h3 id="title">Pick a conversation</h3>
     <div id="messages"></div>
+    <div id="typing"></div>
     <form id="composer">
       <input id="text" autocomplete="off" placeholder="Message…" />
       <button>Send</button>
