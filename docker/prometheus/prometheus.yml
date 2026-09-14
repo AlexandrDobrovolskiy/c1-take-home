@@ -10,7 +10,7 @@ scrape_configs:
     dns_sd_configs:
       - names: ["api"]
         type: A
-        port: 3000
+        port: 9091 # dedicated metrics port — never routed by Envoy
     metrics_path: /metrics
 
   - job_name: prometheus

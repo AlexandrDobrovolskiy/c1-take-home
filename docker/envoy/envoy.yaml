@@ -13,6 +13,11 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress
+                # Envoy is the edge: derive the client address from the actual
+                # connection and append it to X-Forwarded-For, ignoring any
+                # client-supplied XFF (which is attacker-controlled).
+                use_remote_address: true
+                xff_num_trusted_hops: 0
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:
@@ -21,9 +26,7 @@ static_resources:
                     - name: app
                       domains: ["*"]
                       routes:
-                        # metrics are for the internal Prometheus scraper only
-                        - match: { path: "/metrics" }
-                          direct_response: { status: 404, body: { inline_string: "not found\n" } }
+                        # (metrics live on an internal-only port now — nothing to block here)
                         - match: { prefix: "/" }
                           route:
                             cluster: api

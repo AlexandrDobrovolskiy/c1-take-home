@@ -16,14 +16,14 @@ import { metricsHandler, metricsMiddleware } from './metrics.ts';
 const INSTANCE = os.hostname();
 
 const app = express();
-app.set('trust proxy', true); // behind Envoy — req.ip comes from X-Forwarded-For
+// Exactly one trusted hop (Envoy, which appends the real client address to
+// XFF via use_remote_address). `true` here would trust attacker-supplied XFF.
+app.set('trust proxy', 1);
 app.use((_req, res, next) => {
   res.set('X-Instance', INSTANCE);
   next();
 });
 app.use(metricsMiddleware);
-// Scraped by Prometheus over the internal network; Envoy 404s it at the edge.
-app.get('/metrics', metricsHandler);
 app.use(express.json());
 app.use(express.static('web'));
 
@@ -43,6 +43,20 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 const server = http.createServer(app);
 attachWs(server);
 
+// Metrics on a separate internal-only port: Envoy never routes to it, so no
+// edge path-matching (case tricks, trailing slashes) can expose it.
+const metricsServer = http.createServer((req, res) => {
+  if (req.url?.split('?')[0] === '/metrics') {
+    metricsHandler(req, res).catch(() => {
+      res.statusCode = 500;
+      res.end();
+    });
+  } else {
+    res.statusCode = 404;
+    res.end();
+  }
+});
+
 await waitForMysql();
 await connectRedis();
 await startFanout();
@@ -50,12 +64,14 @@ await startFanout();
 server.listen(config.port, () => {
   console.log(`relay listening on :${config.port} (instance ${INSTANCE})`);
 });
+metricsServer.listen(config.metricsPort);
 
 // Graceful drain: stop accepting, close WS clients (they reconnect to the
 // surviving replicas), finish in-flight requests, then release connections.
 // Without this, every scale-down or redeploy hard-drops live traffic.
 function shutdown(signal: string): void {
   console.log(`${signal} received — draining (instance ${INSTANCE})`);
+  metricsServer.close();
   server.close(() => {
     Promise.allSettled([pool.end(), closeRedis()]).then(() => process.exit(0));
   });

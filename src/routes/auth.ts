@@ -16,13 +16,26 @@ const DUMMY_HASH =
 
 export const authRouter = express.Router();
 
-// Brute-force deterrence, keyed by client IP (Envoy sets X-Forwarded-For;
-// `trust proxy` makes req.ip honor it).
-const loginLimiter = rateLimit({ ...config.loginRate, key: (req) => `login:${req.ip}` });
+// Brute-force deterrence, two buckets: per client IP (Envoy appends the real
+// address via use_remote_address; trust proxy=1 reads exactly that hop, so
+// client-crafted XFF is ignored) and per target username (an attacker
+// rotating source IPs still can't hammer one account). Both fail CLOSED —
+// login protection must not vanish when Redis is down.
+const loginIpLimiter = rateLimit({
+  ...config.loginRate,
+  failMode: 'closed',
+  key: (req) => `login:${req.ip}`,
+});
+const loginUserLimiter = rateLimit({
+  ...config.loginRate,
+  failMode: 'closed',
+  key: (req) => `login-user:${String(req.body?.username ?? '').toLowerCase().slice(0, 60)}`,
+});
 
 authRouter.post(
   '/login',
-  loginLimiter,
+  loginIpLimiter,
+  loginUserLimiter,
   wrap(async (req, res) => {
     const { username, password } = req.body || {};
     if (typeof username !== 'string' || typeof password !== 'string') {

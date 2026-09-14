@@ -1,4 +1,5 @@
 import client from 'prom-client';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NextFunction, Request, Response } from 'express';
 
 // Per-instance metrics, scraped by Prometheus at /metrics (internal network
@@ -49,7 +50,6 @@ export const rateLimited = new client.Counter({
 });
 
 function routeLabel(req: Request): string {
-  if (req.path === '/metrics') return '/metrics';
   if (req.path.startsWith('/api/')) return req.path;
   return 'static';
 }
@@ -66,7 +66,8 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-export async function metricsHandler(_req: Request, res: Response): Promise<void> {
-  res.set('Content-Type', registry.contentType);
-  res.send(await registry.metrics());
+// Plain Node handler — it serves the internal metrics server, not Express.
+export async function metricsHandler(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+  res.setHeader('Content-Type', registry.contentType);
+  res.end(await registry.metrics());
 }

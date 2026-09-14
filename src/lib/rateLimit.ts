@@ -65,16 +65,24 @@ export async function consume(key: string, opts: RateLimitOptions): Promise<Rate
   return { allowed: allowed === 1, retryAfterS: retryMs / 1000 };
 }
 
-// Express middleware. Fails OPEN: if Redis is unreachable the request goes
-// through with a logged error — the limiter is protection, not a dependency
-// worth taking the product down for.
-export function rateLimit(opts: RateLimitOptions & { key: (req: Request) => string }): RequestHandler {
+// Express middleware. Default fails OPEN: if Redis is unreachable the request
+// goes through with a logged error — the limiter is protection, not a
+// dependency worth taking the product down for. Security-sensitive routes
+// (login) pass failMode: 'closed' — a brute-force control that vanishes under
+// infrastructure stress is exactly what an attacker wants.
+export function rateLimit(
+  opts: RateLimitOptions & { key: (req: Request) => string; failMode?: 'open' | 'closed' },
+): RequestHandler {
   return wrap(async (req, res, next) => {
     const key = opts.key(req);
     let result: RateLimitResult;
     try {
       result = await consume(key, opts);
     } catch (err) {
+      if (opts.failMode === 'closed') {
+        console.error('rate limiter unavailable, refusing request:', err);
+        return res.status(503).json({ error: 'temporarily unavailable, retry shortly' });
+      }
       console.error('rate limiter unavailable, allowing request:', err);
       return next();
     }

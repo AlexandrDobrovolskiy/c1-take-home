@@ -16,7 +16,7 @@ services:
     command: ["node_modules/.bin/tsx", "src/index.ts"]
     restart: unless-stopped
     env_file: .env
-    expose: ["3000"]
+    expose: ["3000", "9091"]
     deploy:
       replicas: 3
     depends_on:

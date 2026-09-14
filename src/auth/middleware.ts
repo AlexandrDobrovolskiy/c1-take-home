@@ -18,7 +18,13 @@ export function tokenFromCookies(header: string | undefined): string | null {
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
     if (eq !== -1 && part.slice(0, eq).trim() === COOKIE_NAME) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        // malformed percent-encoding (e.g. `relay_token=%`) is an invalid
+        // token, not a crash — this used to kill the process via the WS path
+        return null;
+      }
     }
   }
   return null;
