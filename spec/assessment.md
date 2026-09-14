@@ -37,5 +37,5 @@ followed; outcomes are in `docs/`.
 
 Auth + authorization → event-loop & idempotency fixes (TDD) → N+1 + index (TDD) → pagination + WS
 resilience → multi-instance fan-out → rate limiting (TDD) → search (TDD) → typing indicator →
-load testing + autoscaler → observability. Fix notes land in `docs/fixes.md`; each feature gets
+load testing + autoscaler → observability. Fix notes land in `docs/02-fixes.md`; each feature gets
 its own doc; every fix arrives with tests that failed first (RED) and pass after (GREEN).

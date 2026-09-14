@@ -1,6 +1,6 @@
 # Fix notes
 
-> **Update (post-audit):** fixes 2 and 4 below describe the MySQL+Mongo era; the dual write was later collapsed into a single MySQL store, which retires the ghost-message failure mode and the healing path entirely. Client-side retry now reuses the clientId, making the idempotency fix effective for human retries. See [post-audit.md](post-audit.md).
+> **Update (post-audit):** fixes 2 and 4 below describe the MySQL+Mongo era; the dual write was later collapsed into a single MySQL store, which retires the ghost-message failure mode and the healing path entirely. Client-side retry now reuses the clientId, making the idempotency fix effective for human retries. See [post-audit.md](10-post-audit.md).
 
 Short note per fix, as requested — what was actually wrong and what changed.
 Both fixes below were done test-first (RED/GREEN): `tests/messages.test.ts`, run with

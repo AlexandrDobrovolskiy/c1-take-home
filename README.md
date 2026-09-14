@@ -48,7 +48,7 @@ Then open <http://localhost:3000>. It seeds a couple of demo users and conversat
 ## What changed in this fork
 
 All four tasks are built, the bugs are found and fixed (test-first), plus load testing,
-autoscaling, and a live Grafana dashboard. **Start at [`docs/overview.md`](docs/overview.md)** —
+autoscaling, and a live Grafana dashboard. **Start at [`docs/00-overview.md`](docs/00-overview.md)** —
 it links every write-up and lists the verification commands. The original assessment/plan is in
 [`spec/assessment.md`](spec/assessment.md).
 

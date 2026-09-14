@@ -75,4 +75,4 @@ discipline, and a gap between documented claims ("verified") and what tests actu
 20. The load-test "integrity reconciliation" proves the write path only; the WS delivery half is
     unmeasured. → rescope the claim; commit the reconciliation script.
 
-Remediation from here is tracked in `docs/post-audit.md` and the commit history.
+Remediation from here is tracked in `docs/10-post-audit.md` and the commit history.

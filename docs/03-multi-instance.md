@@ -1,6 +1,6 @@
 # Multi-instance (tasks/multi-instance.md)
 
-> **Update (post-audit):** the claim below that clients on other instances "catch up via the reconnect/resync path" during a Redis outage was wrong — healthy sockets never reconnect, so events were silently missed until the heartbeat noticed. The hub now ACKs subscriptions (client refetches history after `subscribed`), delivers via per-conversation/user socket indexes with backpressure, and publishes membership events; residual gap-detection work is listed in [post-audit.md](post-audit.md).
+> **Update (post-audit):** the claim below that clients on other instances "catch up via the reconnect/resync path" during a Redis outage was wrong — healthy sockets never reconnect, so events were silently missed until the heartbeat noticed. The hub now ACKs subscriptions (client refetches history after `subscribed`), delivers via per-conversation/user socket indexes with backpressure, and publishes membership events; residual gap-detection work is listed in [post-audit.md](10-post-audit.md).
 
 ## What broke with >1 instance
 

@@ -3,9 +3,27 @@
 This is the entry point to everything that changed in this take-home, why, and how to see it
 working. Each area has a deeper write-up in this folder; `spec/assessment.md` holds the initial
 bug hunt and plan the work followed. After feature-complete, a five-role audit panel reviewed the
-result — findings in [audit.md](audit.md), remediation in [post-audit.md](post-audit.md). The
+result — findings in [audit.md](09-audit.md), remediation in [post-audit.md](10-post-audit.md). The
 biggest post-audit change: **messages live in MySQL only** (single atomic store, FULLTEXT search);
 MongoDB is gone from the stack.
+
+### Read in order
+
+The files in this folder are numbered in reading order — roughly the order the work happened.
+
+0. **[Overview](00-overview.md)** (this file) — map + quick start + headline results
+1. [Authentication & authorization](01-auth.md) — the first and load-bearing change
+2. [Bug fixes](02-fixes.md) — event-loop blocker, idempotency, N+1/index, pagination, WS resilience
+3. [Multi-instance](03-multi-instance.md) — Redis pub/sub delivery bus
+4. [Rate limiting](04-rate-limiting.md) — distributed token bucket
+5. [Search](05-search.md) — unified chat + message search
+6. [Typing indicator](06-typing-indicator.md) — ephemeral events on the bus
+7. [Load testing](07-load-testing.md) — k6 on an isolated stack + autoscaler
+8. [Observability](08-observability.md) — Prometheus + Grafana dashboard
+9. [Audit](09-audit.md) — five-role review panel findings
+10. [Post-audit remediation](10-post-audit.md) — what the audit changed, what remains open
+
+(`spec/assessment.md` is the pre-work bug hunt; read it before doc 1 for the "before" picture.)
 
 ## Quick start for a reviewer
 
@@ -25,7 +43,7 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
   Tear down with `npm run load-test:down`. Dashboards: `npm run dashboard` (dev stack) /
   `npm run dashboard:load` (load stack).
 
-## What was broken → fixed (details: [fixes.md](fixes.md), [auth.md](auth.md))
+## What was broken → fixed (details: [fixes.md](02-fixes.md), [auth.md](01-auth.md))
 
 | # | Defect | Fix |
 |---|--------|-----|
@@ -41,24 +59,24 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
 
 ## Features (all four tasks)
 
-- **Multi-instance** ([multi-instance.md](multi-instance.md)) — Redis pub/sub delivery bus, one
+- **Multi-instance** ([multi-instance.md](03-multi-instance.md)) — Redis pub/sub delivery bus, one
   uniform path, graceful local-only degradation; 3 replicas behind Envoy verified by e2e.
-- **Rate limiting** ([rate-limiting.md](rate-limiting.md)) — distributed token bucket (atomic Lua
+- **Rate limiting** ([rate-limiting.md](04-rate-limiting.md)) — distributed token bucket (atomic Lua
   in Redis), per user *per conversation*, 429 + precise `Retry-After`; holds across replicas
   (verified: a burst served by three instances still capped exactly). Login brute-force limiter
   included.
-- **Search** ([search.md](search.md)) — Telegram-style: one query returns matching chats +
+- **Search** ([search.md](05-search.md)) — Telegram-style: one query returns matching chats +
   messages (Mongo text index, scoped substring fallback), authorization inside the query,
   search-as-you-type UI with jump-to-message.
-- **Typing indicator** ([typing-indicator.md](typing-indicator.md)) — ephemeral events on the same
+- **Typing indicator** ([typing-indicator.md](06-typing-indicator.md)) — ephemeral events on the same
   Redis bus, zero-DB authorization via the socket's verified subscriptions, throttled both ends.
 
 ## Beyond the tasks
 
-- **Observability** ([observability.md](observability.md)) — provisioned Prometheus + Grafana;
+- **Observability** ([observability.md](08-observability.md)) — provisioned Prometheus + Grafana;
   replicas discovered via DNS (autoscaled replicas appear automatically), 14-panel dashboard
   (latency percentiles, per-replica CPU/memory, scaling events, limiter rejections, k6 overlay).
-- **Load testing** ([load-testing.md](load-testing.md)) — k6 against an isolated stack;
+- **Load testing** ([load-testing.md](07-load-testing.md)) — k6 against an isolated stack;
   write-path throughput measured with three-way integrity reconciliation (k6 201s == MySQL rows ==
   Mongo bodies, exact match at every rate tested).
 - **Autoscaler** (`tools/autoscaler.mjs`) — HPA-style proportional CPU scaler for compose;

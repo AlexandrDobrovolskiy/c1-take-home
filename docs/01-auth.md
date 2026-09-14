@@ -1,6 +1,6 @@
 # Authentication & authorization
 
-> **Update (post-audit):** boot now fails in production when AUTH_SECRET is missing or left at the dev default (the audit forged tokens with it), and login rate limiting is two fail-closed buckets (per IP with a fixed XFF chain, per username). See [post-audit.md](post-audit.md).
+> **Update (post-audit):** boot now fails in production when AUTH_SECRET is missing or left at the dev default (the audit forged tokens with it), and login rate limiting is two fail-closed buckets (per IP with a fixed XFF chain, per username). See [post-audit.md](10-post-audit.md).
 
 ## What was wrong
 

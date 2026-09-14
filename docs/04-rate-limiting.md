@@ -1,6 +1,6 @@
 # Rate limiting (tasks/rate-limiting.md)
 
-> **Update (post-audit):** the original "req.ip is the real client" claim was wrong two ways (spoofable XFF, and browser traffic sharing one bucket). Fixed: Envoy `use_remote_address` + `trust proxy: 1`, login limited per-IP *and* per-username, failing closed when Redis is down, and the bucket clock now comes from Redis TIME so replica clock skew cannot mint tokens. See [post-audit.md](post-audit.md).
+> **Update (post-audit):** the original "req.ip is the real client" claim was wrong two ways (spoofable XFF, and browser traffic sharing one bucket). Fixed: Envoy `use_remote_address` + `trust proxy: 1`, login limited per-IP *and* per-username, failing closed when Redis is down, and the bucket clock now comes from Redis TIME so replica clock skew cannot mint tokens. See [post-audit.md](10-post-audit.md).
 
 ## Requirements → what was built
 
@@ -32,7 +32,7 @@ strict-security endpoint you might choose fail-closed.)
 
 ## Also covered: login brute force
 
-`docs/auth.md` deferred login rate limiting to this task. `POST /api/auth/login` now has a per-IP
+`docs/01-auth.md` deferred login rate limiting to this task. `POST /api/auth/login` now has a per-IP
 bucket (burst 10, 1 token / 2s; `LOGIN_RATE_*` to tune). Envoy sets `X-Forwarded-For` and the app
 sets `trust proxy`, so `req.ip` is the real client. Verified: 12 rapid bad-password attempts → ten
 401s then 429s.
