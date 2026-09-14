@@ -44,8 +44,11 @@ messagesRouter.post(
 
     // Sender username comes straight from the token — no extra lookup.
     const out = { ...msg, senderUsername: req.user.username };
-    await broadcast(out.conversationId, { type: 'message', ...out });
-    messagesSent.inc();
+    // A deduplicated retry returns the original message — already broadcast once.
+    if (!msg.deduped) {
+      await broadcast(out.conversationId, { type: 'message', ...out });
+      messagesSent.inc();
+    }
     res.status(201).json(out);
   }),
 );

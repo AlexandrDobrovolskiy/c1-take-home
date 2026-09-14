@@ -6,7 +6,6 @@
 // conversation (bodies word-seeded so search has realistic hits).
 
 import { pool, waitForMysql } from '../../src/db/mysql.ts';
-import { closeMongo, connectMongo, ensureMongoIndexes, mongo } from '../../src/db/mongo.ts';
 import { hashPassword } from '../../src/auth/passwords.ts';
 
 const USERS = Number(process.env.LOAD_USERS || 50);
@@ -15,8 +14,6 @@ const MSGS = Number(process.env.LOAD_MSGS || 500);
 const WORDS = ['order', 'delivery', 'update', 'tracking', 'invoice', 'schedule', 'design', 'launch', 'metrics', 'summary'];
 
 await waitForMysql();
-await connectMongo();
-await ensureMongoIndexes();
 
 const [[{ n }]] = (await pool.query(
   "SELECT COUNT(*) AS n FROM users WHERE username LIKE 'loaduser%'",
@@ -46,27 +43,18 @@ await pool.query('INSERT INTO conversation_participants (conversation_id, user_i
   Array.from({ length: USERS }, (_, i) => [firstConvId + (i % CONVS), firstUserId + i]),
 ]);
 
-const bodies = mongo().collection('message_bodies');
 for (let cv = 0; cv < CONVS; cv++) {
   const convId = firstConvId + cv;
   const members = Array.from({ length: USERS }, (_, i) => i).filter((i) => i % CONVS === cv);
-  const [m] = await pool.query('INSERT INTO messages (conversation_id, sender_id) VALUES ?', [
-    Array.from({ length: MSGS }, (_, k) => [convId, firstUserId + members[k % members.length]]),
+  await pool.query('INSERT INTO messages (conversation_id, sender_id, body) VALUES ?', [
+    Array.from({ length: MSGS }, (_, k) => [
+      convId,
+      firstUserId + members[k % members.length],
+      `${WORDS[k % WORDS.length]} ${WORDS[(k + 3) % WORDS.length]} message ${k} in load conv ${cv + 1}`,
+    ]),
   ]);
-  const firstMsgId = (m as { insertId: number }).insertId;
-  await bodies.insertMany(
-    Array.from({ length: MSGS }, (_, k) => ({
-      _id: (firstMsgId + k) as never,
-      conversationId: convId,
-      senderId: firstUserId + members[k % members.length],
-      body: `${WORDS[k % WORDS.length]} ${WORDS[(k + 3) % WORDS.length]} message ${k} in load conv ${cv + 1}`,
-      createdAt: new Date(),
-    })),
-    { ordered: false },
-  );
 }
 
 console.log('load seed done');
 await pool.end();
-await closeMongo();
 process.exit(0);

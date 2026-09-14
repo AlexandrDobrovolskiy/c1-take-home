@@ -1,7 +1,6 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { pool, waitForMysql } from '../src/db/mysql.ts';
-import { closeMongo, connectMongo, ensureMongoIndexes, mongo } from '../src/db/mongo.ts';
 import { createMessage } from '../src/services/messages.ts';
 import { searchAll } from '../src/services/search.ts';
 
@@ -27,8 +26,6 @@ async function makeConv(title: string, userId: number): Promise<number> {
 
 before(async () => {
   await waitForMysql();
-  await connectMongo();
-  await ensureMongoIndexes();
   searcher = await insert(
     "INSERT INTO users (name, email, username, password_hash) VALUES ('Search Test', 's@test.local', 'test-search-user', 'x')",
   );
@@ -49,13 +46,11 @@ before(async () => {
 });
 
 after(async () => {
-  await mongo().collection('message_bodies').deleteMany({ conversationId: { $in: convIds } });
   await pool.query('DELETE FROM messages WHERE conversation_id IN (?)', [convIds]);
   await pool.query('DELETE FROM conversation_participants WHERE conversation_id IN (?)', [convIds]);
   await pool.query('DELETE FROM conversations WHERE id IN (?)', [convIds]);
   await pool.query('DELETE FROM users WHERE id IN (?)', [[searcher, outsider]]);
   await pool.end();
-  await closeMongo();
 });
 
 describe('searchAll', () => {
@@ -85,9 +80,14 @@ describe('searchAll', () => {
   });
 
   it('falls back to substring match when the word index has no hit', async () => {
-    const r = await searchAll(searcher, 'phoen'); // partial word — $text cannot match it
+    const r = await searchAll(searcher, 'phoen'); // partial word — FULLTEXT cannot match it
     assert.ok(r.messages.length >= 2, 'prefix should match via fallback');
     assert.ok(r.messages.every((m) => m.body.includes('phoen')));
+  });
+
+  it('treats LIKE wildcards in the query as literals', async () => {
+    const r = await searchAll(searcher, '%'); // must not match everything
+    assert.equal(r.messages.length, 0);
   });
 
   it('caps results', async () => {

@@ -17,27 +17,11 @@ services:
     deploy:
       replicas: 3
     depends_on:
-      seed:
-        condition: service_completed_successfully
-    volumes:
-      - ./:/app
-      - /app/node_modules
-
-  seed:
-    build:
-      context: .
-      dockerfile: docker/app/Dockerfile
-    command: npm run seed
-    restart: "no"
-    env_file: .env
-    volumes:
-      - ./:/app
-      - /app/node_modules
-    depends_on:
       mysql:
         condition: service_healthy
-      mongo:
-        condition: service_started
+    volumes:
+      - ./:/app
+      - /app/node_modules
 
   mysql:
     image: mysql:8
@@ -53,10 +37,6 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
-
-  mongo:
-    image: mongo:7
-    ports: ["27017:27017"]
 
   redis:
     image: redis:7

@@ -1,10 +1,9 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { pool, waitForMysql } from '../src/db/mysql.ts';
-import { closeMongo, connectMongo, mongo } from '../src/db/mongo.ts';
 import { createMessage, listMessages } from '../src/services/messages.ts';
 
-// Integration tests — run against the compose MySQL/Mongo (docker compose exec api npm test).
+// Integration tests — run against the compose MySQL (docker compose exec api npm test).
 // A throwaway conversation gets 12 messages (bodies "m1".."m12", ascending ids).
 
 let convId: number;
@@ -13,7 +12,6 @@ const msgIds: number[] = [];
 
 before(async () => {
   await waitForMysql();
-  await connectMongo();
   const [u] = await pool.execute(
     "INSERT INTO users (name, email, username, password_hash) VALUES ('Page Test', 'page@test.local', 'test-page-user', 'x')",
   );
@@ -36,13 +34,11 @@ before(async () => {
 });
 
 after(async () => {
-  await mongo().collection('message_bodies').deleteMany({ conversationId: convId });
   await pool.execute('DELETE FROM messages WHERE conversation_id = ?', [convId]);
   await pool.execute('DELETE FROM conversation_participants WHERE conversation_id = ?', [convId]);
   await pool.execute('DELETE FROM conversations WHERE id = ?', [convId]);
   await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
   await pool.end();
-  await closeMongo();
 });
 
 describe('listMessages cursor pagination', () => {

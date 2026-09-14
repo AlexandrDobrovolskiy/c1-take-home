@@ -1,5 +1,4 @@
 import { pool } from '../db/mysql.ts';
-import { mongo } from '../db/mongo.ts';
 
 export interface NewMessage {
   conversationId: number;
@@ -14,6 +13,9 @@ export interface Message {
   senderId: number;
   body: string;
   createdAt: Date;
+  // true when this call deduplicated a retry — the message already existed
+  // (callers must not broadcast it again)
+  deduped?: boolean;
 }
 
 export interface MessagePage {
@@ -41,7 +43,7 @@ export async function listMessages(
   params.push(limit + 1);
   const [rows] = (await pool.query(
     `SELECT m.id, m.conversation_id AS conversationId, m.sender_id AS senderId,
-            m.created_at AS createdAt, u.username AS senderUsername
+            m.body, m.created_at AS createdAt, u.username AS senderUsername
      FROM messages m
      JOIN users u ON u.id = m.sender_id
      WHERE m.conversation_id = ? ${cursor}
@@ -53,84 +55,43 @@ export async function listMessages(
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit).reverse(); // ascending for display
 
-  const ids = page.map((m) => m.id);
-  const bodies = ids.length
-    ? await mongo()
-        .collection('message_bodies')
-        .find({ _id: { $in: ids as never[] } })
-        .toArray()
-    : [];
-  const bodyById = new Map(bodies.map((b) => [b._id as unknown as number, b.body as string]));
-
   return {
-    messages: page.map((m) => ({ ...m, body: bodyById.get(m.id) ?? '' })),
+    messages: page,
     nextCursor: hasMore && page.length ? page[0].id : null,
   };
 }
 
+// One atomic insert — row and body commit or fail together. The unique index
+// on (conversation_id, client_id) makes retries and concurrent duplicates
+// converge on the original message.
 export async function createMessage(input: NewMessage): Promise<Message> {
   const { conversationId, senderId, body, clientId } = input;
 
-  let id: number;
   try {
     const [res] = await pool.execute(
-      'INSERT INTO messages (conversation_id, sender_id, client_id) VALUES (?, ?, ?)',
-      [conversationId, senderId, clientId],
+      'INSERT INTO messages (conversation_id, sender_id, client_id, body) VALUES (?, ?, ?, ?)',
+      [conversationId, senderId, clientId, body],
     );
-    id = (res as { insertId: number }).insertId;
+    const id = (res as { insertId: number }).insertId;
+    return { id, conversationId, senderId, body, createdAt: new Date() };
   } catch (err) {
-    // Unique index on (conversation_id, client_id): a duplicate means this is a
-    // retry (or a concurrent double-send) — return the original message.
     if (clientId && (err as { code?: string }).code === 'ER_DUP_ENTRY') {
-      return existingMessage(conversationId, clientId, body);
+      const [[row]] = (await pool.query(
+        `SELECT id, sender_id AS senderId, body, created_at AS createdAt
+         FROM messages WHERE conversation_id = ? AND client_id = ?`,
+        [conversationId, clientId],
+      )) as unknown as [{ id: number; senderId: number; body: string; createdAt: Date }[]];
+      if (!row) throw err;
+      // The original message wins — return it, flagged so it isn't re-broadcast.
+      return {
+        id: row.id,
+        conversationId,
+        senderId: row.senderId,
+        body: row.body,
+        createdAt: row.createdAt,
+        deduped: true,
+      };
     }
     throw err;
   }
-
-  const createdAt = new Date();
-  await mongo().collection('message_bodies').insertOne({
-    _id: id as never,
-    conversationId,
-    senderId,
-    body,
-    createdAt,
-  });
-
-  return { id, conversationId, senderId, body, createdAt };
-}
-
-async function existingMessage(
-  conversationId: number,
-  clientId: string,
-  retryBody: string,
-): Promise<Message> {
-  const [[row]] = (await pool.query(
-    `SELECT id, sender_id AS senderId, created_at AS createdAt
-     FROM messages WHERE conversation_id = ? AND client_id = ?`,
-    [conversationId, clientId],
-  )) as unknown as [{ id: number; senderId: number; createdAt: Date }[]];
-  if (!row) throw new Error('duplicate clientId but original message not found');
-
-  // The original request may have died between its MySQL and Mongo writes, so
-  // heal a missing body on retry; $setOnInsert never overwrites an existing one.
-  const doc = await mongo().collection('message_bodies').findOneAndUpdate(
-    { _id: row.id as never },
-    {
-      $setOnInsert: {
-        conversationId,
-        senderId: row.senderId,
-        body: retryBody,
-        createdAt: row.createdAt,
-      },
-    },
-    { upsert: true, returnDocument: 'after' },
-  );
-
-  return {
-    id: row.id,
-    conversationId,
-    senderId: row.senderId,
-    body: doc?.body ?? retryBody,
-    createdAt: row.createdAt,
-  };
 }

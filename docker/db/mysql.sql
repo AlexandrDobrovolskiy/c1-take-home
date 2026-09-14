@@ -25,13 +25,18 @@ CREATE TABLE messages (
   conversation_id INT NOT NULL,
   sender_id INT NOT NULL,
   client_id VARCHAR(64) NULL,
+  -- body lives with the row (single store): the send is one atomic insert, and the
+  -- MySQL/Mongo split's whole dual-write failure class disappears (see docs/audit.md P2)
+  body TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   -- idempotency: a client retry with the same clientId must not create a second message
   -- (NULL client_id rows are exempt — MySQL allows repeated NULLs in a unique index)
   UNIQUE KEY uq_messages_conversation_client (conversation_id, client_id),
   -- per-conversation access path: history reads, last-message and count lookups.
   -- InnoDB appends the PK, so this behaves as (conversation_id, id) — id-ordered per conversation.
-  KEY idx_messages_conversation (conversation_id)
+  KEY idx_messages_conversation (conversation_id),
+  -- word search with relevance ranking (search falls back to LIKE for partial words)
+  FULLTEXT KEY ft_messages_body (body)
 );
 
 -- demo password for all three users: "demo" (scrypt, salt:hash)
@@ -47,7 +52,7 @@ INSERT INTO conversations (id, title) VALUES
 INSERT INTO conversation_participants (conversation_id, user_id) VALUES
   (1, 1), (1, 2), (2, 1), (2, 3);
 
-INSERT INTO messages (id, conversation_id, sender_id, client_id) VALUES
-  (1, 1, 2, NULL),
-  (2, 1, 1, NULL),
-  (3, 2, 3, NULL);
+INSERT INTO messages (id, conversation_id, sender_id, client_id, body) VALUES
+  (1, 1, 2, NULL, 'Hi, any update on order #1042?'),
+  (2, 1, 1, NULL, 'Checking now — give me a minute.'),
+  (3, 2, 3, NULL, 'Notes from the design sync are in the doc.');

@@ -13,8 +13,6 @@ services:
     ports: !override ["3101:3000"]
   mysql:
     ports: !override []
-  mongo:
-    ports: !override []
   api:
     environment:
       # The load generator is a single IP; production per-IP login limits would

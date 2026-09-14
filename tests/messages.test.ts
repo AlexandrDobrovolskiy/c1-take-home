@@ -2,17 +2,15 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { pool, waitForMysql } from '../src/db/mysql.ts';
-import { closeMongo, connectMongo, mongo } from '../src/db/mongo.ts';
-import { createMessage } from '../src/services/messages.ts';
+import { createMessage, listMessages } from '../src/services/messages.ts';
 
-// Integration tests — run against the compose MySQL/Mongo (docker compose exec api npm test).
+// Integration tests — run against the compose MySQL (docker compose exec api npm test).
 // All rows are scoped to a throwaway conversation created here and removed in after().
 
 let convId: number;
 
 before(async () => {
   await waitForMysql();
-  await connectMongo();
   const [created] = await pool.execute(
     "INSERT INTO conversations (title) VALUES ('test: createMessage')",
   );
@@ -24,39 +22,38 @@ before(async () => {
 });
 
 after(async () => {
-  await mongo().collection('message_bodies').deleteMany({ conversationId: convId });
   await pool.execute('DELETE FROM messages WHERE conversation_id = ?', [convId]);
   await pool.execute('DELETE FROM conversation_participants WHERE conversation_id = ?', [convId]);
   await pool.execute('DELETE FROM conversations WHERE id = ?', [convId]);
   await pool.end();
-  await closeMongo();
 });
 
 describe('createMessage clientId idempotency', () => {
   it('a retried clientId returns the original message instead of duplicating', async () => {
     const input = { conversationId: convId, senderId: 1, body: 'retried send', clientId: 'test-dup-1' };
     const first = await createMessage(input);
-    const second = await createMessage(input);
+    const second = await createMessage({ ...input, body: 'retried send (changed)' });
 
     assert.equal(second.id, first.id, 'retry must return the already-created message');
-    assert.equal(second.body, first.body);
+    assert.equal(second.body, first.body, 'the original body wins');
+    assert.equal(second.deduped, true, 'retry is flagged so callers skip re-broadcast');
+    assert.ok(!first.deduped, 'original send is not flagged');
 
     const [[row]] = (await pool.query(
       'SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND client_id = ?',
       [convId, 'test-dup-1'],
     )) as unknown as [{ n: number }[]];
-    assert.equal(row.n, 1, 'exactly one MySQL row per clientId');
+    assert.equal(row.n, 1, 'exactly one row per clientId');
 
-    const bodyCount = await mongo()
-      .collection('message_bodies')
-      .countDocuments({ conversationId: convId });
-    assert.equal(bodyCount, 1, 'exactly one Mongo body per clientId');
+    const page = await listMessages(convId);
+    assert.equal(page.messages.filter((m) => m.body === 'retried send').length, 1);
   });
 
   it('two concurrent sends with the same clientId converge on one message', async () => {
     const input = { conversationId: convId, senderId: 1, body: 'race', clientId: 'test-dup-race' };
     const [a, b] = await Promise.all([createMessage(input), createMessage(input)]);
     assert.equal(a.id, b.id, 'concurrent duplicates must converge on one id');
+    assert.ok(a.deduped !== b.deduped, 'exactly one of the two is the original');
   });
 
   it('distinct clientIds and null clientIds still create distinct messages', async () => {

@@ -6,12 +6,10 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "seed": "tsx docker/db/seed.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "mongodb": "^6.8.0",
     "mysql2": "^3.11.3",
     "prom-client": "^15.1.3",
     "redis": "^6.2.1",

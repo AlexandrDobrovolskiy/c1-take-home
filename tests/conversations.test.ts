@@ -28,9 +28,9 @@ before(async () => {
   }
   // conv A: 3 messages, conv B: none, conv C: 1
   for (let i = 0; i < 3; i++) {
-    lastMsgIdA = await insert('INSERT INTO messages (conversation_id, sender_id) VALUES (?, ?)', [convIds[0], userId]);
+    lastMsgIdA = await insert('INSERT INTO messages (conversation_id, sender_id, body) VALUES (?, ?, ?)', [convIds[0], userId, `a${i}`]);
   }
-  await insert('INSERT INTO messages (conversation_id, sender_id) VALUES (?, ?)', [convIds[2], userId]);
+  await insert('INSERT INTO messages (conversation_id, sender_id, body) VALUES (?, ?, ?)', [convIds[2], userId, 'c0']);
 });
 
 after(async () => {

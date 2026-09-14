@@ -1,5 +1,4 @@
 import { pool } from '../db/mysql.ts';
-import { mongo } from '../db/mongo.ts';
 
 // Telegram-style unified search: one query fans out to conversation titles and
 // message bodies, results come back grouped. Everything is scoped to the
@@ -18,10 +17,11 @@ export interface SearchResults {
   }[];
 }
 
-interface BodyDoc {
-  _id: number;
+interface Row {
+  id: number;
   conversationId: number;
   senderId: number;
+  senderUsername: string;
   body: string;
   createdAt: Date;
 }
@@ -43,49 +43,46 @@ export async function searchAll(userId: number, q: string, limit = 20): Promise<
   const needle = q.toLowerCase();
   const conversations = convs.filter((c) => c.title.toLowerCase().includes(needle)).slice(0, limit);
 
-  const bodies = mongo().collection<BodyDoc>('message_bodies');
-
-  // Primary: text index — indexed word/stem matching ranked by relevance,
+  // Primary: FULLTEXT — indexed word/stem matching ranked by relevance,
   // newest first among equals.
-  let docs = await bodies
-    .find(
-      { $text: { $search: q }, conversationId: { $in: ids } },
-      { projection: { score: { $meta: 'textScore' }, conversationId: 1, senderId: 1, body: 1, createdAt: 1 } },
-    )
-    .sort({ score: { $meta: 'textScore' }, _id: -1 })
-    .limit(limit)
-    .toArray();
+  let [rows] = (await pool.query(
+    `SELECT m.id, m.conversation_id AS conversationId, m.sender_id AS senderId,
+            m.body, m.created_at AS createdAt, u.username AS senderUsername,
+            MATCH(m.body) AGAINST (? IN NATURAL LANGUAGE MODE) AS score
+     FROM messages m
+     JOIN users u ON u.id = m.sender_id
+     WHERE m.conversation_id IN (?)
+       AND MATCH(m.body) AGAINST (? IN NATURAL LANGUAGE MODE)
+     ORDER BY score DESC, m.id DESC
+     LIMIT ?`,
+    [q, ids, q, limit],
+  )) as unknown as [Row[]];
 
   // Fallback for what a word index can't match (partial words like "phoen").
   // Bounded: index-scoped to the user's conversations and capped at `limit`.
-  if (docs.length === 0) {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    docs = await bodies
-      .find({ conversationId: { $in: ids }, body: { $regex: escaped, $options: 'i' } })
-      .sort({ _id: -1 })
-      .limit(limit)
-      .toArray();
-  }
-
-  // Resolve sender usernames in one round trip.
-  const senderIds = [...new Set(docs.map((d) => d.senderId))];
-  const usernameById = new Map<number, string>();
-  if (senderIds.length) {
-    const [users] = (await pool.query('SELECT id, username FROM users WHERE id IN (?)', [
-      senderIds,
-    ])) as unknown as [{ id: number; username: string }[]];
-    for (const u of users) usernameById.set(u.id, u.username);
+  if (rows.length === 0) {
+    const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+    [rows] = (await pool.query(
+      `SELECT m.id, m.conversation_id AS conversationId, m.sender_id AS senderId,
+              m.body, m.created_at AS createdAt, u.username AS senderUsername
+       FROM messages m
+       JOIN users u ON u.id = m.sender_id
+       WHERE m.conversation_id IN (?) AND m.body LIKE ?
+       ORDER BY m.id DESC
+       LIMIT ?`,
+      [ids, `%${escaped}%`, limit],
+    )) as unknown as [Row[]];
   }
 
   return {
     conversations,
-    messages: docs.map((d) => ({
-      messageId: d._id,
-      conversationId: d.conversationId,
-      conversationTitle: titleById.get(d.conversationId) ?? `#${d.conversationId}`,
-      senderUsername: usernameById.get(d.senderId) ?? `#${d.senderId}`,
-      body: d.body,
-      createdAt: d.createdAt,
+    messages: rows.map((r) => ({
+      messageId: r.id,
+      conversationId: r.conversationId,
+      conversationTitle: titleById.get(r.conversationId) ?? `#${r.conversationId}`,
+      senderUsername: r.senderUsername,
+      body: r.body,
+      createdAt: r.createdAt,
     })),
   };
 }
