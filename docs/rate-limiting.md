@@ -1,5 +1,7 @@
 # Rate limiting (tasks/rate-limiting.md)
 
+> **Update (post-audit):** the original "req.ip is the real client" claim was wrong two ways (spoofable XFF, and browser traffic sharing one bucket). Fixed: Envoy `use_remote_address` + `trust proxy: 1`, login limited per-IP *and* per-username, failing closed when Redis is down, and the bucket clock now comes from Redis TIME so replica clock skew cannot mint tokens. See [post-audit.md](post-audit.md).
+
 ## Requirements → what was built
 
 - ~5 messages / 10s, per user per conversation → **token bucket**: capacity 5, refill 0.5 tokens/s,

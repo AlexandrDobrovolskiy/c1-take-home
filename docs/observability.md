@@ -1,5 +1,7 @@
 # Observability: Grafana dashboard for load & scaling
 
+> **Update (post-audit):** /metrics now lives on a dedicated internal-only port (9091) that Envoy never routes — the edge path-block described below was bypassable (`/Metrics`) and is gone. Grafana anonymous access is Viewer-only now.
+
 `docker compose up` now includes **Prometheus + Grafana**, fully provisioned — open
 <http://localhost:3001/d/relay> (anonymous access in dev; put real auth in front for production)
 and the "Relay — Load & Scaling" dashboard is already there with data flowing. The isolated

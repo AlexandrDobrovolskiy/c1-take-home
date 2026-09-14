@@ -1,5 +1,7 @@
 # Load testing & autoscaling
 
+> **Update (post-audit):** these numbers predate the single-store migration and should be read as *shape*, not absolutes: the read-scenario tables use closed-model pacing (queueing hides in throughput, not latency), the generator shares the host with the stack, and percentiles are loopback-measured. The write-path reconciliation proved MySQL+Mongo agreement; with one store that check is obsolete. See [post-audit.md](post-audit.md).
+
 ## Tool and method
 
 **k6** (Grafana): scenarios scripted in JS to match the stack, built-in latency percentiles and

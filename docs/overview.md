@@ -2,7 +2,10 @@
 
 This is the entry point to everything that changed in this take-home, why, and how to see it
 working. Each area has a deeper write-up in this folder; `spec/assessment.md` holds the initial
-bug hunt and plan the work followed.
+bug hunt and plan the work followed. After feature-complete, a five-role audit panel reviewed the
+result — findings in [audit.md](audit.md), remediation in [post-audit.md](post-audit.md). The
+biggest post-audit change: **messages live in MySQL only** (single atomic store, FULLTEXT search);
+MongoDB is gone from the stack.
 
 ## Quick start for a reviewer
 
@@ -13,7 +16,8 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
 
 - **App**: <http://localhost:3000> — demo users `alice` / `bob` / `carol`, password `demo`.
 - **Live dashboard**: `./tools/open-dashboard.sh` → <http://localhost:3001/d/relay>.
-- **Tests** (20, all TDD'd with the fixes/features): `docker compose exec api npm test`
+- **Tests** (31 — service integration + HTTP auth enforcement; the headline fixes were built
+  test-first): `docker compose exec api npm test`
 - **E2E** (multi-instance fan-out, typing): `docker compose exec api node tests/e2e/fanout.mjs`
   and `.../typing.mjs`
 - **Load test with live dashboard + autoscaler** (isolated stack, one command):
@@ -26,7 +30,7 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
 |---|--------|-----|
 | 1 | No auth/authz at all — client-supplied identity, WS open to anyone | Stateless HMAC token in httpOnly cookie (scrypt login), membership enforced on send/read/WS subscribe |
 | 2 | `pbkdf2Sync` blocked the event loop ~20ms per send (~392ms under 20 concurrent) | Removed (it wasn't a real signature); sends 40ms → 7ms |
-| 3 | Client retries created duplicate messages | `UNIQUE (conversation_id, client_id)` + return-original on conflict; concurrent-safe |
+| 3 | Client retries created duplicate messages | `UNIQUE (conversation_id, client_id)` + return-original on conflict; client reuses the clientId on retry |
 | 4 | Express 4 async errors crashed the process | `wrap()` + central JSON error middleware |
 | 5 | Stored XSS via conversation title | `textContent` |
 | 6 | N+1 inbox queries + no index on messages | One `LEFT JOIN LATERAL` query + `(conversation_id)` index — covering-index plan |
@@ -59,21 +63,26 @@ docker compose up --build        # app on :3000 (3 api replicas), Grafana on :30
 - **Autoscaler** (`tools/autoscaler.mjs`) — HPA-style proportional CPU scaler for compose;
   verified live scaling 2→3→5→6 under a 6,000 sends/s ramp with 99.87% processed.
 
-## Headline numbers (single 18-core host, everything sharing it)
+## Load-test results (read as shape, not gospel — single 18-core host, co-located generator)
 
-- Send pipeline (limiter → membership → MySQL → Mongo → Redis publish → WS fan-out):
+- Send pipeline (limiter → membership → atomic MySQL insert → Redis publish → WS fan-out):
   **p95 3–7ms** at 600–3,000 sends/s; **6,000 sends/s peak** absorbed at 6 replicas
-  (p95 21ms, 0.12% failures, zero 5xx, ≈19k WS deliveries/s).
-- Reads: inbox p95 1.4ms, history p95 2.6ms, search p95 4.8ms at ~3,100 req/s mixed load.
-- Rate limiter: ~2,700 rejections/s sustained without breaking a sweat.
+  (p95 21ms, 0.12% failures, zero 5xx, ≈19k WS deliveries/s). Numbers were measured pre-migration
+  against the dual-store pipeline; methodology caveats in load-testing.md.
+- Reads: inbox p95 1.4ms, history p95 2.6ms, search p95 4.8ms at ~3,100 req/s mixed load
+  (closed-model pacing — see the caveat note in load-testing.md).
+- Rate limiter: ~2,700 rejections/s sustained.
 
 ## Known limitations / what I'd do next
 
-- **MySQL+Mongo dual write** isn't atomic — mitigated (retry heals bodies, reconciliation verified
-  no drift under load), but the honest fix is one store or an outbox.
-- **Token revocation** before expiry isn't possible (stateless trade-off, documented).
+- **No event-gap detection** beyond the resubscribe refetch: a Redis outage means missed realtime
+  for remote clients until the heartbeat closes their sockets (≤30s). Next: per-conversation
+  sequence checks or Redis Streams.
+- **Token revocation** before expiry isn't possible (stateless trade-off, documented in auth.md).
 - **Single Redis** is the eventual bottleneck for pub/sub + limiting; sharding path sketched in
   multi-instance.md.
 - **TLS** (`wss://`, `Secure` cookies) assumed to live at a terminating proxy in front.
 - Reactive autoscaling keeps a ~10–15s under-provisioned window on sharp ramps (p99-only spike);
   headroom or predictive scaling would close it.
+- No signup, message edit/delete, delivery acks, or forward pagination from a search hit —
+  see audit.md P4 / post-audit.md "Still open".

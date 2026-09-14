@@ -1,5 +1,7 @@
 # Search (tasks/search.md)
 
+> **Update (post-audit):** search now runs on MySQL FULLTEXT (single store — Mongo was removed, see [post-audit.md](post-audit.md)); the contract, scoping, fallback, and UI below are unchanged.
+
 ## Approach — Telegram-style unified search
 
 One query, two indexes searched in the same request, results grouped by kind (the way Telegram's
