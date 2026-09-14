@@ -2,14 +2,14 @@ import http from 'node:http';
 import os from 'node:os';
 import express from 'express';
 import { config } from './config.ts';
-import { waitForMysql } from './db/mysql.ts';
-import { connectRedis } from './db/redis.ts';
+import { pool, waitForMysql } from './db/mysql.ts';
+import { closeRedis, connectRedis } from './db/redis.ts';
 import { requireAuth } from './auth/middleware.ts';
 import { authRouter } from './routes/auth.ts';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
-import { attachWs, startFanout } from './ws/hub.ts';
+import { attachWs, shutdownWs, startFanout } from './ws/hub.ts';
 import { metricsHandler, metricsMiddleware } from './metrics.ts';
 
 // Which replica served a request — useful when running multiple instances.
@@ -50,3 +50,17 @@ await startFanout();
 server.listen(config.port, () => {
   console.log(`relay listening on :${config.port} (instance ${INSTANCE})`);
 });
+
+// Graceful drain: stop accepting, close WS clients (they reconnect to the
+// surviving replicas), finish in-flight requests, then release connections.
+// Without this, every scale-down or redeploy hard-drops live traffic.
+function shutdown(signal: string): void {
+  console.log(`${signal} received — draining (instance ${INSTANCE})`);
+  server.close(() => {
+    Promise.allSettled([pool.end(), closeRedis()]).then(() => process.exit(0));
+  });
+  shutdownWs();
+  setTimeout(() => process.exit(1), 8_000).unref(); // hard deadline
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

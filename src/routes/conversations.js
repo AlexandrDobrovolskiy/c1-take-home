@@ -1,6 +1,7 @@
 import express from 'express';
 import { pool } from '../db/mysql.ts';
 import { listConversations } from '../services/conversations.ts';
+import { broadcastToUsers } from '../ws/hub.ts';
 import { wrap } from '../lib/wrap.ts';
 
 const MAX_TITLE_LENGTH = 200;
@@ -56,6 +57,10 @@ conversationsRouter.post(
     } finally {
       conn.release();
     }
+
+    // Tell every participant's live sockets — otherwise invitees get no
+    // realtime for the new conversation until they reload.
+    await broadcastToUsers([...participantIds], { type: 'conversation', id, title });
 
     res.status(201).json({ id, title, participantIds: [...participantIds] });
   }),

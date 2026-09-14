@@ -68,6 +68,20 @@ function connectWs() {
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.type === 'subscribed') {
+      // Delivery is live from this moment. Re-fetch the open conversation so
+      // anything that landed between (re)connect and now is not lost.
+      if (activeConversation) {
+        const c = conversations.find((x) => x.id === activeConversation);
+        if (c) openConversation(c.id, c.title);
+      }
+      return;
+    }
+    if (msg.type === 'conversation') {
+      // Added to a new conversation — refresh the sidebar and resubscribe.
+      loadConversations();
+      return;
+    }
     if (msg.type === 'typing') {
       noteTyping(msg.conversationId, msg.username);
       return;
@@ -100,13 +114,11 @@ function scheduleReconnect() {
   }, delay);
 }
 
-// After an outage: refresh sidebar counts, reconnect the socket, and re-fetch
-// the open conversation so messages missed while offline appear.
+// After an outage: refresh sidebar counts and reconnect. The open conversation
+// is re-fetched when the server ACKs the new subscription ('subscribed'), so
+// no message can fall between reconnect and resubscribe.
 async function resync() {
   await loadConversations();
-  if (!activeConversation) return;
-  const c = conversations.find((x) => x.id === activeConversation);
-  if (c) await openConversation(c.id, c.title);
 }
 
 // aroundId (optional): open the conversation at that message — the page
@@ -205,12 +217,12 @@ function renderTyping() {
   renderSidebar(); // sidebar shows a typing hint for the other conversations
 }
 
-let lastTypingSentAt = 0;
+const lastTypingSentAt = new Map(); // per conversation — switching rooms mustn't suppress it
 document.getElementById('text').oninput = () => {
   if (!activeConversation || !ws || ws.readyState !== WebSocket.OPEN) return;
   const now = Date.now();
-  if (now - lastTypingSentAt < 2000) return; // server refreshes ~before the 3s TTL lapses
-  lastTypingSentAt = now;
+  if (now - (lastTypingSentAt.get(activeConversation) ?? 0) < 2000) return; // refreshes before the 3s TTL lapses
+  lastTypingSentAt.set(activeConversation, now);
   ws.send(JSON.stringify({ type: 'typing', conversationId: activeConversation }));
 };
 
