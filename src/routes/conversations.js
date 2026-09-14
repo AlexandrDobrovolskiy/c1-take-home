@@ -1,6 +1,6 @@
 import express from 'express';
 import { pool } from '../db/mysql.ts';
-import { listConversations } from '../services/conversations.ts';
+import { listConversations, markRead } from '../services/conversations.ts';
 import { broadcastToUsers } from '../ws/hub.ts';
 import { wrap } from '../lib/wrap.ts';
 
@@ -12,6 +12,21 @@ conversationsRouter.get(
   '/',
   wrap(async (req, res) => {
     res.json(await listConversations(req.user.uid));
+  }),
+);
+
+// POST /api/conversations/:id/read { lastMessageId } — advance the caller's
+// read marker so unread state survives reloads and follows them across devices.
+conversationsRouter.post(
+  '/:id/read',
+  wrap(async (req, res) => {
+    const conversationId = Number(req.params.id);
+    const lastMessageId = Number(req.body?.lastMessageId);
+    if (!Number.isInteger(conversationId) || !Number.isInteger(lastMessageId) || lastMessageId < 0) {
+      return res.status(400).json({ error: 'lastMessageId is required' });
+    }
+    await markRead(req.user.uid, conversationId, lastMessageId);
+    res.status(204).end();
   }),
 );
 

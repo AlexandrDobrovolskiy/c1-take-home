@@ -17,6 +17,9 @@ CREATE TABLE conversations (
 CREATE TABLE conversation_participants (
   conversation_id INT NOT NULL,
   user_id INT NOT NULL,
+  -- unread state lives server-side: a message is unread if its id is greater
+  -- than what this participant has marked read (survives reloads and devices)
+  last_read_message_id BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (conversation_id, user_id)
 );
 

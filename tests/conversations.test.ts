@@ -1,7 +1,7 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { pool, waitForMysql } from '../src/db/mysql.ts';
-import { listConversations } from '../src/services/conversations.ts';
+import { listConversations, markRead } from '../src/services/conversations.ts';
 
 // Integration tests — run against the compose MySQL (docker compose exec api npm test).
 // A throwaway user owns three conversations with 3 / 0 / 1 messages.
@@ -61,6 +61,26 @@ describe('listConversations', () => {
 
   it('returns nothing for a user with no conversations', async () => {
     assert.deepEqual(await listConversations(999999), []);
+  });
+
+  it('persists unread state server-side via the read marker', async () => {
+    let list = await listConversations(userId);
+    const a = list.find((c) => c.id === convIds[0])!;
+    const b = list.find((c) => c.id === convIds[1])!;
+    assert.equal(a.unread, true, 'messages exist beyond the (zero) read marker');
+    assert.equal(b.unread, false, 'empty conversation is never unread');
+
+    await markRead(userId, convIds[0], lastMsgIdA);
+    list = await listConversations(userId);
+    assert.equal(list.find((c) => c.id === convIds[0])!.unread, false, 'read marker clears unread');
+
+    // marker is monotonic: an older ack can't regress it
+    await markRead(userId, convIds[0], lastMsgIdA - 1);
+    list = await listConversations(userId);
+    assert.equal(list.find((c) => c.id === convIds[0])!.unread, false);
+
+    // another user's marker is unaffected — no cross-user writes
+    await markRead(999999, convIds[0], lastMsgIdA);
   });
 
   it('issues a constant number of queries regardless of conversation count (no N+1)', async () => {

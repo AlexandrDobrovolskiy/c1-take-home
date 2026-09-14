@@ -5,12 +5,14 @@ export interface ConversationSummary {
   title: string;
   lastMessage: { id: number; senderId: number; createdAt: Date } | null;
   messageCount: number;
+  unread: boolean;
 }
 
 interface Row {
   id: number;
   title: string;
   messageCount: number;
+  lastReadMessageId: number;
   lastMessageId: number | null;
   lastSenderId: number | null;
   lastCreatedAt: Date | null;
@@ -23,6 +25,7 @@ export async function listConversations(userId: number): Promise<ConversationSum
   const [rows] = (await pool.query(
     `SELECT c.id, c.title,
             agg.cnt AS messageCount,
+            p.last_read_message_id AS lastReadMessageId,
             last.id AS lastMessageId,
             last.sender_id AS lastSenderId,
             last.created_at AS lastCreatedAt
@@ -47,5 +50,21 @@ export async function listConversations(userId: number): Promise<ConversationSum
         ? { id: r.lastMessageId, senderId: r.lastSenderId!, createdAt: r.lastCreatedAt! }
         : null,
     messageCount: r.messageCount,
+    unread: r.lastMessageId !== null && r.lastMessageId > r.lastReadMessageId,
   }));
+}
+
+// Advance the caller's read marker (monotonic — GREATEST guards races between
+// tabs/devices). A non-participant matches zero rows: silent no-op.
+export async function markRead(
+  userId: number,
+  conversationId: number,
+  lastMessageId: number,
+): Promise<void> {
+  await pool.execute(
+    `UPDATE conversation_participants
+     SET last_read_message_id = GREATEST(last_read_message_id, ?)
+     WHERE conversation_id = ? AND user_id = ?`,
+    [lastMessageId, conversationId, userId],
+  );
 }

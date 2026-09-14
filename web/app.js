@@ -4,6 +4,24 @@ let wsRetry = 0;
 let activeConversation;
 let nextCursor = null;
 let conversations = [];
+// Guards against stale async responses clobbering the current view: bump on
+// every navigation, re-check after every await before touching the DOM.
+let viewSeq = 0;
+let renderedIds = new Set(); // message ids in the pane — dedups WS echo vs fetch overlap
+let loadingOlder = false;
+let pendingSend = null; // { body, clientId } — a failed send retries with the SAME clientId
+const readMarkAt = new Map(); // conversationId -> highest lastMessageId already reported read
+
+function markRead(conversationId, lastMessageId) {
+  if (!lastMessageId) return;
+  if ((readMarkAt.get(conversationId) ?? 0) >= lastMessageId) return;
+  readMarkAt.set(conversationId, lastMessageId);
+  fetch(`/api/conversations/${conversationId}/read`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lastMessageId }),
+  }).catch(() => {});
+}
 
 async function init() {
   const res = await fetch('/api/auth/me');
@@ -92,6 +110,7 @@ function connectWs() {
     if (c) c.messageCount += 1;
     if (msg.conversationId === activeConversation) {
       appendMessage(msg);
+      markRead(msg.conversationId, msg.id); // watching it = reading it
     } else if (c) {
       c.unread = true;
     }
@@ -124,6 +143,7 @@ async function resync() {
 // aroundId (optional): open the conversation at that message — the page
 // *ending* with it — highlighted, with a way back to the latest messages.
 async function openConversation(id, title, aroundId) {
+  const seq = ++viewSeq;
   activeConversation = id;
   const c = conversations.find((x) => x.id === id);
   if (c) c.unread = false;
@@ -132,9 +152,11 @@ async function openConversation(id, title, aroundId) {
   document.getElementById('title').textContent = title;
   const cursor = aroundId ? `&before=${aroundId + 1}` : '';
   const res = await fetch(`/api/messages?conversationId=${id}${cursor}`);
-  if (!res.ok) return;
+  if (!res.ok || seq !== viewSeq) return; // user navigated away meanwhile
   const page = await res.json();
+  if (seq !== viewSeq) return;
   nextCursor = page.nextCursor;
+  renderedIds = new Set(page.messages.map((m) => m.id));
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
   renderOlderButton(pane);
@@ -145,6 +167,7 @@ async function openConversation(id, title, aroundId) {
   }
   pane.scrollTop = pane.scrollHeight;
   renderTyping();
+  if (!aroundId) markRead(id, page.messages.at(-1)?.id);
   if (aroundId) {
     const latest = document.createElement('button');
     latest.id = 'jumpLatest';
@@ -165,17 +188,28 @@ function renderOlderButton(pane) {
 }
 
 async function loadOlder() {
-  if (!nextCursor || !activeConversation) return;
-  const res = await fetch(`/api/messages?conversationId=${activeConversation}&before=${nextCursor}`);
-  if (!res.ok) return;
-  const page = await res.json();
-  nextCursor = page.nextCursor;
-  const pane = document.getElementById('messages');
-  const prevHeight = pane.scrollHeight;
-  const anchor = document.getElementById('loadOlder')?.nextSibling ?? pane.firstChild;
-  for (const m of page.messages) pane.insertBefore(messageDiv(m), anchor);
-  renderOlderButton(pane);
-  pane.scrollTop += pane.scrollHeight - prevHeight; // keep view anchored
+  if (loadingOlder || !nextCursor || !activeConversation) return; // double-click / stale guards
+  loadingOlder = true;
+  const seq = viewSeq;
+  try {
+    const res = await fetch(`/api/messages?conversationId=${activeConversation}&before=${nextCursor}`);
+    if (!res.ok || seq !== viewSeq) return; // user switched views mid-flight
+    const page = await res.json();
+    if (seq !== viewSeq) return;
+    nextCursor = page.nextCursor;
+    const pane = document.getElementById('messages');
+    const prevHeight = pane.scrollHeight;
+    const anchor = document.getElementById('loadOlder')?.nextSibling ?? pane.firstChild;
+    for (const m of page.messages) {
+      if (renderedIds.has(m.id)) continue;
+      renderedIds.add(m.id);
+      pane.insertBefore(messageDiv(m), anchor);
+    }
+    renderOlderButton(pane);
+    pane.scrollTop += pane.scrollHeight - prevHeight; // keep view anchored
+  } finally {
+    loadingOlder = false;
+  }
 }
 
 // --- typing indicators: conversationId -> Map(username -> expiry). Entries
@@ -234,6 +268,10 @@ function messageDiv(m) {
 }
 
 function appendMessage(m) {
+  if (m.id) {
+    if (renderedIds.has(m.id)) return; // already in the pane (fetch/WS overlap)
+    renderedIds.add(m.id);
+  }
   const pane = document.getElementById('messages');
   pane.appendChild(messageDiv(m));
   pane.scrollTop = pane.scrollHeight;
@@ -244,23 +282,33 @@ document.getElementById('composer').onsubmit = async (e) => {
   const input = document.getElementById('text');
   const body = input.value.trim();
   if (!body || !activeConversation) return;
+  // A retry of a failed send reuses the SAME clientId, so the server's
+  // idempotency key actually protects against user-driven duplicates.
+  const clientId =
+    pendingSend && pendingSend.body === body ? pendingSend.clientId : crypto.randomUUID();
   input.value = '';
-  const res = await fetch('/api/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      conversationId: activeConversation,
-      body,
-      clientId: crypto.randomUUID(),
-    }),
-  });
-  if (!res.ok) {
+  let res;
+  try {
+    res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: activeConversation, body, clientId }),
+    });
+  } catch {
+    res = null; // network failure — same retry path
+  }
+  if (!res || !res.ok) {
+    pendingSend = { body, clientId };
     input.value = body; // don't lose what they typed
-    if (res.status === 429) {
+    if (res && res.status === 429) {
       const wait = res.headers.get('Retry-After') || 'a few';
       flashComposer(`Sending too fast — retry in ${wait}s`);
+    } else {
+      flashComposer('Send failed — press Enter to retry');
     }
+    return;
   }
+  pendingSend = null;
 };
 
 function flashComposer(text) {
@@ -311,8 +359,9 @@ async function runSearch() {
   const q = document.getElementById('search').value.trim();
   if (q.length < 2) return;
   const seq = ++searchSeq;
+  const nav = viewSeq; // if the user opens a conversation meanwhile, drop the result
   const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  if (!res.ok || seq !== searchSeq) return; // stale response — a newer query is in flight
+  if (!res.ok || seq !== searchSeq || nav !== viewSeq) return;
   renderResults(q, await res.json());
 }
 
@@ -324,7 +373,9 @@ function sectionLabel(text) {
 }
 
 function renderResults(q, { conversations: convHits, messages: msgHits }) {
+  viewSeq++; // the pane now belongs to search results
   activeConversation = null;
+  renderedIds = new Set();
   document.getElementById('title').textContent = `Search: "${q}"`;
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
