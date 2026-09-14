@@ -78,3 +78,36 @@ requests** — replica discovery and traffic redistribution are seamless.
 - Not yet bottlenecked: at these rates MySQL pool (10 conns/replica), Mongo, and Redis all stayed
   comfortable. The first real ceiling is likely the single Redis for pub/sub + rate limiting;
   the docs in multi-instance.md sketch the sharding path.
+
+## Write-path throughput (no 429s — every request fully processed)
+
+The runs above measure reads and limiter behavior; the paced `sends` scenario produced only ~1,200
+real messages, and the abuse traffic was rejected *before* the write path. To measure actual
+message processing, `tests/load/k6-throughput.js` drives sends with an **open-model arrival-rate
+executor** (offered load holds even if latency degrades, so a ceiling shows up as rising
+percentiles / dropped iterations instead of the tool slowing down), against the isolated stack
+started with send limits raised via env (`SEND_RATE_CAPACITY=1000000 …`). Crucially the limiter
+still executes its Redis Lua check on every request — only the rejections disappear — so the
+measured pipeline is the full production path: limiter → membership check → MySQL insert →
+Mongo body insert → Redis publish → WS fan-out to subscribers (60 sockets held throughout).
+
+| offered peak | sends processed | send med | p95 | p99 | failures |
+|---|---|---|---|---|---|
+| 600/s  | 49,250  | 1.6 ms | 3.0 ms | 4.7 ms | 0 |
+| 2,000/s | 161,250 | 2.0 ms | 3.7 ms | 5.7 ms | 0 |
+
+No dropped iterations at either rate — 3 replicas sustained **2,000 fully-processed messages/sec**
+(≈6,400 WS deliveries/sec at the observed ~3.2 subscribers/conversation) and the ceiling was not
+reached on this hardware.
+
+**End-to-end integrity reconciliation** — the proof that "processed" means processed. After each
+run, three independent counts must agree: k6's 201 count, the MySQL `messages` row delta, and the
+Mongo `message_bodies` delta (plus zero empty/missing bodies):
+
+```
+600/s run:    49,250 == 49,250 == 49,250   (empty bodies: 0)   RECONCILED
+2,000/s run: 161,250 == 161,250 == 161,250                     RECONCILED
+```
+
+Every message accepted with 201 landed in both stores under both loads — the dual-write with
+idempotent retry healing held up with no drift. No restarts or OOM kills in either run.
